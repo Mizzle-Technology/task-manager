@@ -1,0 +1,41 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{C3302116-2451-47EF-B479-0DF66208470C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "mongodb-service", "src\mongodb-service\mongodb-service.csproj", "{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "subscriber", "src\subscriber\subscriber.csproj", "{6725767D-7513-47F4-BCC2-B33D56DA2CE9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "workers", "src\workers\workers.csproj", "{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6725767D-7513-47F4-BCC2-B33D56DA2CE9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6725767D-7513-47F4-BCC2-B33D56DA2CE9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6725767D-7513-47F4-BCC2-B33D56DA2CE9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6725767D-7513-47F4-BCC2-B33D56DA2CE9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1} = {C3302116-2451-47EF-B479-0DF66208470C}
+		{6725767D-7513-47F4-BCC2-B33D56DA2CE9} = {C3302116-2451-47EF-B479-0DF66208470C}
+		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A} = {C3302116-2451-47EF-B479-0DF66208470C}
+	EndGlobalSection
+EndGlobal
