@@ -11,6 +11,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "subscriber", "src\subscribe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "workers", "src\workers\workers.csproj", "{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{BD742EC7-B1F4-4174-AE8B-8E7A1EE9BAF3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "mongodb-service.tests", "tests\mongodb-service.tests\mongodb-service.tests.csproj", "{B0BE911B-C731-45A2-90DF-2B8413D38F67}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,10 +36,15 @@ Global
 		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0BE911B-C731-45A2-90DF-2B8413D38F67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0BE911B-C731-45A2-90DF-2B8413D38F67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0BE911B-C731-45A2-90DF-2B8413D38F67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0BE911B-C731-45A2-90DF-2B8413D38F67}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{CC9DCFE9-77CD-4E57-A0C7-6921DE1ACFA1} = {C3302116-2451-47EF-B479-0DF66208470C}
 		{6725767D-7513-47F4-BCC2-B33D56DA2CE9} = {C3302116-2451-47EF-B479-0DF66208470C}
 		{EEB6CF6D-B66D-4711-8728-8B7C8F69264A} = {C3302116-2451-47EF-B479-0DF66208470C}
+		{B0BE911B-C731-45A2-90DF-2B8413D38F67} = {BD742EC7-B1F4-4174-AE8B-8E7A1EE9BAF3}
 	EndGlobalSection
 EndGlobal
