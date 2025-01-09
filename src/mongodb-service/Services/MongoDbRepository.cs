@@ -10,9 +10,11 @@ namespace mongodb_service.Services;
 
 public class MongoDbRepository : IMongoDbRepository
 {
-    private readonly IMongoCollection<TaskEntity> _taskCollection;
+    private IMongoCollection<TaskEntity>? _taskCollection;
     private readonly ILogger<MongoDbRepository> _logger;
     private readonly TimeSpan _staleTaskTimeout;
+    private readonly IMongoClient _client;
+    private readonly string _databaseName;
 
     public MongoDbRepository(
         IMongoClient client,
@@ -20,22 +22,37 @@ public class MongoDbRepository : IMongoDbRepository
         ILogger<MongoDbRepository> logger)
     {
         _logger = logger;
+        _client = client;
+        _databaseName = settings.Value.DatabaseName;
         _staleTaskTimeout = settings.Value.StaleTaskTimeout;
+    }
+
+    private IMongoCollection<TaskEntity> GetCollection()
+    {
+        if (_taskCollection == null)
+        {
+            throw new DatabaseOperationException("MongoDB repository not initialized. Call InitializeAsync first.");
+        }
+        return _taskCollection;
+    }
+
+    public async Task InitializeAsync()
+    {
         try
         {
-            var database = client.GetDatabase(settings.Value.DatabaseName);
+            var database = _client.GetDatabase(_databaseName);
             _taskCollection = database.GetCollection<TaskEntity>("tasks");
 
             // Create indexes
             var indexKeysDefinition = Builders<TaskEntity>.IndexKeys.Ascending(x => x.TaskId);
             var indexOptions = new CreateIndexOptions { Unique = true };
             var indexModel = new CreateIndexModel<TaskEntity>(indexKeysDefinition, indexOptions);
-            _taskCollection.Indexes.CreateOne(indexModel);
+            await _taskCollection.Indexes.CreateOneAsync(indexModel);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to initialize MongoDB connection");
-            throw;
+            throw new DatabaseOperationException("Failed to initialize MongoDB connection", ex);
         }
     }
 
@@ -43,6 +60,7 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.Eq(x => x.TaskId, task.TaskId);
             var options = new ReplaceOptions { IsUpsert = true };
 
@@ -53,13 +71,13 @@ public class MongoDbRepository : IMongoDbRepository
             }
             task.UpdatedAt = DateTime.UtcNow;
 
-            await _taskCollection.ReplaceOneAsync(filter, task, options);
+            await collection.ReplaceOneAsync(filter, task, options);
             _logger.LogInformation("Task {TaskId} upserted successfully", task.TaskId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to upsert task: {TaskId}", task.TaskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to upsert task {task.TaskId}", ex);
         }
     }
 
@@ -67,6 +85,7 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId);
             var update = Builders<TaskEntity>.Update
                 .Set(x => x.Status, status)
@@ -86,7 +105,7 @@ public class MongoDbRepository : IMongoDbRepository
                     break;
             }
 
-            var result = await _taskCollection.UpdateOneAsync(filter, update);
+            var result = await collection.UpdateOneAsync(filter, update);
             _logger.LogInformation("Task {TaskId} status updated to {Status}", taskId, status);
         }
         catch (Exception ex)
@@ -100,17 +119,18 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId);
             var update = Builders<TaskEntity>.Update
                 .Set(x => x.ErrorMessage, errorMessage)
                 .Set(x => x.UpdatedAt, DateTime.UtcNow);
-            await _taskCollection.UpdateOneAsync(filter, update);
+            await collection.UpdateOneAsync(filter, update);
             _logger.LogInformation("Task {TaskId} error message updated", taskId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update task error message: {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to update task {taskId}", ex);
         }
     }
 
@@ -120,6 +140,7 @@ public class MongoDbRepository : IMongoDbRepository
         string workerId,
         DateTime heartbeat)
     {
+        var collection = GetCollection();
         var options = new FindOneAndUpdateOptions<TaskEntity>
         {
             ReturnDocument = ReturnDocument.After,
@@ -143,11 +164,12 @@ public class MongoDbRepository : IMongoDbRepository
             .Set(x => x.UpdatedAt, DateTime.UtcNow)
             .Inc(x => x.Version, 1);
 
-        return await _taskCollection.FindOneAndUpdateAsync(filter, update, options);
+        return await collection.FindOneAndUpdateAsync(filter, update, options);
     }
 
     public async Task UpdateTaskHeartbeatAsync(string taskId, string podId, DateTime heartbeat)
     {
+        var collection = GetCollection();
         var filter = Builders<TaskEntity>.Filter.And(
             Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId),
             Builders<TaskEntity>.Filter.Eq(x => x.WorkerPodId, podId)
@@ -157,25 +179,21 @@ public class MongoDbRepository : IMongoDbRepository
             .Set(x => x.LastHeartbeat, heartbeat)
             .Set(x => x.UpdatedAt, DateTime.UtcNow);
 
-        await _taskCollection.UpdateOneAsync(filter, update);
+        await collection.UpdateOneAsync(filter, update);
     }
 
     public async Task<IEnumerable<TaskEntity>> GetStalledTasksAsync(TimeSpan threshold, string currentWorkerId)
     {
+        var collection = GetCollection();
         var staleCutoff = DateTime.UtcNow.Subtract(threshold);
 
         var filter = Builders<TaskEntity>.Filter.And(
-            // Tasks that are marked as Running
             Builders<TaskEntity>.Filter.Eq(x => x.Status, JobTaskStatus.Running),
-
-            // Either owned by current worker OR stale from other workers
             Builders<TaskEntity>.Filter.Or(
-                // Tasks owned by this worker that are stale
                 Builders<TaskEntity>.Filter.And(
                     Builders<TaskEntity>.Filter.Eq(x => x.WorkerPodId, currentWorkerId),
                     Builders<TaskEntity>.Filter.Lt(x => x.LastHeartbeat, staleCutoff)
                 ),
-                // Tasks owned by other workers that are very stale (2x threshold)
                 Builders<TaskEntity>.Filter.And(
                     Builders<TaskEntity>.Filter.Ne(x => x.WorkerPodId, currentWorkerId),
                     Builders<TaskEntity>.Filter.Lt(x => x.LastHeartbeat, staleCutoff.Subtract(threshold))
@@ -183,7 +201,7 @@ public class MongoDbRepository : IMongoDbRepository
             )
         );
 
-        return await _taskCollection.Find(filter)
+        return await collection.Find(filter)
             .Sort(Builders<TaskEntity>.Sort.Ascending(x => x.LastHeartbeat))
             .ToListAsync();
     }
@@ -192,6 +210,7 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.And(
                 Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId),
                 Builders<TaskEntity>.Filter.Eq(x => x.Status, JobTaskStatus.Running)
@@ -200,12 +219,14 @@ public class MongoDbRepository : IMongoDbRepository
             var update = Builders<TaskEntity>.Update
                 .Set(x => x.Status, status)
                 .Set(x => x.WorkerPodId, null)
+                .Set(x => x.WorkerNodeId, null)
                 .Set(x => x.LastHeartbeat, null)
+                .Set(x => x.LockedAt, null)
                 .Set(x => x.ErrorMessage, reason)
                 .Set(x => x.UpdatedAt, DateTime.UtcNow)
                 .Inc(x => x.Version, 1);
 
-            var result = await _taskCollection.UpdateOneAsync(filter, update);
+            var result = await collection.UpdateOneAsync(filter, update);
             var success = result.ModifiedCount == 1;
 
             if (success)
@@ -224,7 +245,7 @@ public class MongoDbRepository : IMongoDbRepository
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error requeueing task {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to requeue task {taskId}", ex);
         }
     }
 
@@ -232,12 +253,13 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
-            await _taskCollection.Database.RunCommandAsync((Command<BsonDocument>)"{ping:1}");
+            var collection = GetCollection();
+            await collection.Database.RunCommandAsync((Command<BsonDocument>)"{ping:1}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ping MongoDB");
-            throw;
+            throw new DatabaseOperationException("Failed to ping MongoDB", ex);
         }
     }
 
@@ -248,6 +270,7 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.And(
                 Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId),
                 Builders<TaskEntity>.Filter.Eq(x => x.Version, expectedVersion)
@@ -258,18 +281,13 @@ public class MongoDbRepository : IMongoDbRepository
                 .Inc(x => x.Version, 1)
                 .Set(x => x.UpdatedAt, DateTime.UtcNow);
 
-            var result = await _taskCollection.UpdateOneAsync(filter, update);
-            if (result.ModifiedCount == 0)
-            {
-                _logger.LogWarning("Concurrency conflict detected for task {TaskId}. Expected version: {Version}",
-                    taskId, expectedVersion);
-            }
+            var result = await collection.UpdateOneAsync(filter, update);
             return result.ModifiedCount == 1;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update task status with version check: {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to update task {taskId}", ex);
         }
     }
 
@@ -281,6 +299,7 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.And(
                 Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId),
                 Builders<TaskEntity>.Filter.Eq(x => x.Version, expectedVersion),
@@ -292,13 +311,13 @@ public class MongoDbRepository : IMongoDbRepository
                 .Inc(x => x.Version, 1)
                 .Set(x => x.UpdatedAt, DateTime.UtcNow);
 
-            var result = await _taskCollection.UpdateOneAsync(filter, update);
+            var result = await collection.UpdateOneAsync(filter, update);
             return result.ModifiedCount == 1;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update task heartbeat with version check: {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to update task {taskId}", ex);
         }
     }
 
@@ -309,6 +328,7 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.And(
                 Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId),
                 Builders<TaskEntity>.Filter.Eq(x => x.Version, expectedVersion)
@@ -319,13 +339,13 @@ public class MongoDbRepository : IMongoDbRepository
                 .Inc(x => x.Version, 1)
                 .Set(x => x.UpdatedAt, DateTime.UtcNow);
 
-            var result = await _taskCollection.UpdateOneAsync(filter, update);
+            var result = await collection.UpdateOneAsync(filter, update);
             return result.ModifiedCount == 1;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update task error message with version check: {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to update task {taskId}", ex);
         }
     }
 
@@ -333,13 +353,14 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
+            var collection = GetCollection();
             var filter = Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId);
-            return await _taskCollection.Find(filter).FirstOrDefaultAsync();
+            return await collection.Find(filter).FirstOrDefaultAsync();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get task by ID: {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to get task {taskId}", ex);
         }
     }
 
@@ -347,13 +368,15 @@ public class MongoDbRepository : IMongoDbRepository
     {
         try
         {
-            var currentTask = await GetByTaskIdAsync(taskId);
+            var collection = GetCollection();
+            var filter = Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId);
+            var currentTask = await collection.Find(filter).FirstOrDefaultAsync();
             if (currentTask == null) return false;
 
             var success = await UpdateTaskStatusIfVersionMatchesAsync(
-                taskId,
-                currentTask.Version,
-                newStatus);
+            taskId,
+            currentTask.Version,
+            newStatus);
 
             if (success)
             {
@@ -394,7 +417,8 @@ public class MongoDbRepository : IMongoDbRepository
                 .Set(x => x.UpdatedAt, DateTime.UtcNow)
                 .Set(x => x.FailedAt, newStatus == JobTaskStatus.Failed ? DateTime.UtcNow : null);
 
-            var result = await _taskCollection.UpdateOneAsync(filter, update);
+            var collection = GetCollection();
+            var result = await collection.UpdateOneAsync(filter, update);
             var success = result.ModifiedCount == 1;
 
             if (success)
@@ -415,13 +439,5 @@ public class MongoDbRepository : IMongoDbRepository
             _logger.LogError(ex, "Failed to update task status and error atomically: {TaskId}", taskId);
             throw;
         }
-    }
-
-    public async Task InitializeAsync()
-    {
-        var indexKeysDefinition = Builders<TaskEntity>.IndexKeys.Ascending(x => x.TaskId);
-        var indexOptions = new CreateIndexOptions { Unique = true };
-        var indexModel = new CreateIndexModel<TaskEntity>(indexKeysDefinition, indexOptions);
-        await _taskCollection.Indexes.CreateOneAsync(indexModel);
     }
 }
