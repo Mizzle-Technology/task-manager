@@ -458,13 +458,60 @@ public class MongoDbRepositoryTests : IAsyncLifetime
         await _repository!.InsertOrUpdateTaskAsync(task);
 
         // Act
-        await _repository.UpdateTaskStatusWithTimestampAsync(task.TaskId, JobTaskStatus.Failed);
+        var success = await _repository.UpdateTaskStatusAndErrorIfVersionMatchesAsync(
+            task.TaskId,
+            1, // Initial version
+            JobTaskStatus.Failed,
+            "Test error");
 
         // Assert
+        Assert.True(success);
         var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
         Assert.NotNull(updatedTask);
         Assert.NotNull(updatedTask.FailedAt);
         Assert.Equal(JobTaskStatus.Failed, updatedTask.Status);
+        Assert.Equal("Test error", updatedTask.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(JobTaskStatus.Pending, JobTaskStatus.Processing, "ProcessedAt")]
+    [InlineData(JobTaskStatus.Processing, JobTaskStatus.Completed, "CompletedAt")]
+    [InlineData(JobTaskStatus.Processing, JobTaskStatus.Failed, "FailedAt")]
+    public async Task UpdateTaskStatus_ShouldSetAppropriateTimestamp(
+        JobTaskStatus initialStatus,
+        JobTaskStatus newStatus,
+        string timestampProperty)
+    {
+        // Arrange
+        var task = new TaskEntity
+        {
+            TaskId = $"timestamp-test-{Guid.NewGuid()}",
+            Status = initialStatus,
+            Body = "Test body",
+            RetryCount = 0,
+            CreatedAt = DateTime.UtcNow,
+            Id = ObjectId.GenerateNewId().ToString(),
+            Version = 1
+        };
+        await _repository!.InsertOrUpdateTaskAsync(task);
+
+        // Act
+        var success = await _repository.UpdateTaskStatusAndErrorIfVersionMatchesAsync(
+            task.TaskId,
+            1,
+            newStatus,
+            null);
+
+        // Assert
+        Assert.True(success);
+        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
+        Assert.NotNull(updatedTask);
+        Assert.Equal(newStatus, updatedTask.Status);
+
+        // Check the appropriate timestamp was set
+        var timestamp = typeof(TaskEntity).GetProperty(timestampProperty)?.GetValue(updatedTask) as DateTime?;
+        Assert.NotNull(timestamp);
+        Assert.True(timestamp > DateTime.UtcNow.AddSeconds(-5));
     }
 
     [Fact]

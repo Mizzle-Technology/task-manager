@@ -81,40 +81,6 @@ public class MongoDbRepository : IMongoDbRepository
         }
     }
 
-    public async Task UpdateTaskStatusWithTimestampAsync(string taskId, JobTaskStatus status)
-    {
-        try
-        {
-            var collection = GetCollection();
-            var filter = Builders<TaskEntity>.Filter.Eq(x => x.TaskId, taskId);
-            var update = Builders<TaskEntity>.Update
-                .Set(x => x.Status, status)
-                .Set(x => x.UpdatedAt, DateTime.UtcNow);
-
-            // Set the appropriate timestamp based on status
-            switch (status)
-            {
-                case JobTaskStatus.Processing:
-                    update = update.Set(x => x.ProcessedAt, DateTime.UtcNow);
-                    break;
-                case JobTaskStatus.Completed:
-                    update = update.Set(x => x.CompletedAt, DateTime.UtcNow);
-                    break;
-                case JobTaskStatus.Failed:
-                    update = update.Set(x => x.FailedAt, DateTime.UtcNow);
-                    break;
-            }
-
-            var result = await collection.UpdateOneAsync(filter, update);
-            _logger.LogInformation("Task {TaskId} status updated to {Status}", taskId, status);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update task status and timestamp: {TaskId}", taskId);
-            throw new DatabaseOperationException($"Failed to update task {taskId}", ex);
-        }
-    }
-
     public async Task UpdateTaskErrorMessageAsync(string taskId, string errorMessage)
     {
         try
@@ -414,8 +380,21 @@ public class MongoDbRepository : IMongoDbRepository
                 .Set(x => x.Status, newStatus)
                 .Set(x => x.ErrorMessage, errorMessage)
                 .Inc(x => x.Version, 1)
-                .Set(x => x.UpdatedAt, DateTime.UtcNow)
-                .Set(x => x.FailedAt, newStatus == JobTaskStatus.Failed ? DateTime.UtcNow : null);
+                .Set(x => x.UpdatedAt, DateTime.UtcNow);
+
+            // Set the appropriate timestamp based on status
+            switch (newStatus)
+            {
+                case JobTaskStatus.Processing:
+                    update = update.Set(x => x.ProcessedAt, DateTime.UtcNow);
+                    break;
+                case JobTaskStatus.Completed:
+                    update = update.Set(x => x.CompletedAt, DateTime.UtcNow);
+                    break;
+                case JobTaskStatus.Failed:
+                    update = update.Set(x => x.FailedAt, DateTime.UtcNow);
+                    break;
+            }
 
             var collection = GetCollection();
             var result = await collection.UpdateOneAsync(filter, update);
@@ -437,7 +416,7 @@ public class MongoDbRepository : IMongoDbRepository
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update task status and error atomically: {TaskId}", taskId);
-            throw;
+            throw new DatabaseOperationException($"Failed to update task {taskId}", ex);
         }
     }
 }
