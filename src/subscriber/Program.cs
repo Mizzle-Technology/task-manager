@@ -1,10 +1,49 @@
+using Quartz;
+using subscriber.Jobs;
+using subscriber.Services.Queues.Aliyun;
+using mongodb_service.Extensions;
+using subscriber.Services.Queues;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddControllers();
+
+// Add Quartz services
+builder.Services.AddQuartz(q =>
+{
+    var jobKey = new JobKey("MessagePullJob");
+
+    q.AddJob<MessagePullJob>(opts => opts.WithIdentity(jobKey));
+
+    q.AddTrigger(opts => opts
+        .ForJob(jobKey)
+        .WithIdentity("MessagePull-trigger")
+        // Run every 10 seconds
+        .WithCronSchedule("0/10 * * * * ?"));
+});
+
+// Add the Quartz.NET hosted service
+builder.Services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
+
+// Add queue services
+builder.Services.Configure<AliyunMnsConfiguration>(
+    builder.Configuration.GetSection("Aliyun:MNS"));
+builder.Services.AddSingleton<IQueueClient, AliyunMnsClient>();
+builder.Services.AddSingleton<IQueueClientFactory, QueueClientFactory>();
+
+// OR for Azure Service Bus
+// builder.Services.AddSingleton<IMessageQueueService, ServiceBusQueueService>();
+
+// Add MongoDB service
+builder.Services.AddMongoDb(builder.Configuration);
 
 var app = builder.Build();
+
+// Just use this
+app.MapControllers();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -14,28 +53,4 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
-
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
