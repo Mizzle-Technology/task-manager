@@ -1,7 +1,19 @@
 using workers;
+using mongodb_service.Extensions;
+using workers.Services;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
+
+// Add MongoDB services
+builder.Services.AddMongoDb(builder.Configuration);
+
+// Add worker
+builder.Services.AddSingleton<ITaskManager, TaskManager>();
+builder.Services.AddSingleton<ITaskProcessor, TaskProcessor>();
 builder.Services.AddHostedService<Worker>();
 
-var host = builder.Build();
-host.Run();
+builder.Services.AddControllers();
+
+var app = builder.Build();
+app.MapControllers();
+app.Run();

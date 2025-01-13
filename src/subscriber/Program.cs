@@ -30,9 +30,16 @@ builder.Services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
 
 // Add queue services
 builder.Services.Configure<AliyunMnsConfiguration>(
-    builder.Configuration.GetSection("Aliyun:MNS"));
+    builder.Configuration.GetSection("AliyunMns"));
 builder.Services.AddSingleton<IQueueClient, AliyunMnsClient>();
-builder.Services.AddSingleton<IQueueClientFactory, QueueClientFactory>();
+builder.Services.AddSingleton<IQueueClientFactory>(sp =>
+{
+    var clients = new List<IQueueClient> { sp.GetRequiredService<IQueueClient>() };
+    var factory = new QueueClientFactory(clients);
+    // Initialize the Aliyun client
+    factory.GetClient(QueueProvider.AliyunMNS).Initialize(CancellationToken.None);
+    return factory;
+});
 
 // OR for Azure Service Bus
 // builder.Services.AddSingleton<IMessageQueueService, ServiceBusQueueService>();

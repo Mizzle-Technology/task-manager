@@ -13,16 +13,9 @@ public interface IQueueClientFactory
     IQueueClient GetClient(QueueProvider provider);
 }
 
-public class QueueClientFactory : IQueueClientFactory
+public class QueueClientFactory(IEnumerable<IQueueClient> clients) : IQueueClientFactory
 {
-    private readonly IDictionary<QueueProvider, IQueueClient> _clients;
-
-    public QueueClientFactory(IEnumerable<IQueueClient> clients)
-    {
-        _clients = clients.ToDictionary(
-            client => GetProviderType(client),
-            client => client);
-    }
+    private readonly Dictionary<QueueProvider, IQueueClient> _clients = clients.ToDictionary(GetProviderType);
 
     public IQueueClient GetClient(QueueProvider provider)
     {

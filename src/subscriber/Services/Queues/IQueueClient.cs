@@ -2,7 +2,9 @@ namespace subscriber.Services.Queues;
 
 public interface IQueueClient : IAsyncDisposable
 {
-    Task InitializeAsync(CancellationToken cancellationToken);
+    // Required synchronous initialization
+    void Initialize(CancellationToken cancellationToken);
+
     IMessageQueue GetQueue(string queueName);
     Task<QueueHealth> GetQueueHealthAsync(CancellationToken cancellationToken);
 }
@@ -10,5 +12,5 @@ public interface IQueueClient : IAsyncDisposable
 public record QueueHealth(
     bool IsHealthy,
     string Status,
-    int ActiveMessageCount,
-    int DeadLetterMessageCount);
+    long ActiveMessageCount,
+    long DeadLetterMessageCount);
