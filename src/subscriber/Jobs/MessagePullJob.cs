@@ -5,6 +5,7 @@ using mongodb_service.Models;
 using mongodb_service.Services;
 using Polly;
 using Polly.Retry;
+using Microsoft.Extensions.Options;
 namespace subscriber.Jobs;
 
 public record Message(
@@ -17,9 +18,9 @@ public record Message(
 public class MessagePullJob(
     ILogger<MessagePullJob> _logger,
     IQueueClientFactory _queueFactory,
-    IMongoDbRepository _mongoDb) : IJob
+    IMongoDbRepository _mongoDb,
+    IOptions<AliyunMnsConfiguration> _config) : IJob
 {
-    private const int BatchSize = 10;
     private static readonly TimeSpan MessageProcessingTimeout = TimeSpan.FromMinutes(5);
     private readonly AliyunMnsClient _aliyunClient = (AliyunMnsClient)_queueFactory.GetClient(QueueProvider.AliyunMNS);
     private readonly AsyncRetryPolicy _retryPolicy = Policy
@@ -54,9 +55,12 @@ public class MessagePullJob(
                 return;
             }
 
+            var batchSize = _config.Value.BatchSize;
+            var pollingWaitSeconds = _config.Value.PollingWaitSeconds;
+
             var messages = await queue.ReceiveMessagesAsync(
-                BatchSize,
-                TimeSpan.FromSeconds(30),
+                batchSize,
+                TimeSpan.FromSeconds(pollingWaitSeconds),
                 context.CancellationToken);
 
             if (!messages.Any())
@@ -84,7 +88,7 @@ public class MessagePullJob(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error executing message pull job");
-            throw; // Let Quartz handle retries
+            throw;
         }
     }
 

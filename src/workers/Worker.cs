@@ -12,7 +12,7 @@ public class Worker(
 {
     private const int BatchSize = 10;
     private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
-    private readonly TimeSpan _heartbeatInterval = settings.Value.HeartbeatInterval;
+    private readonly TimeSpan _heartbeatInterval = settings.Value.GetHeartbeatInterval();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,7 +36,7 @@ public class Worker(
                                 .CreateLinkedTokenSource(stoppingToken);
 
                             // Set timeout for task processing
-                            linkedCts.CancelAfter(settings.Value.StaleTaskTimeout);
+                            linkedCts.CancelAfter(settings.Value.GetStaleTaskTimeout());
 
                             await taskProcessor.ProcessAsync(task, linkedCts.Token);
                         }
