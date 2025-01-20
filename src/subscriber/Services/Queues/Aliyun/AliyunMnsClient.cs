@@ -9,7 +9,7 @@ public class AliyunMnsClient : IQueueClient
 {
     private readonly ILogger<AliyunMnsClient> _logger;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly IMNS _mnsClient;
+    private readonly MNSClient _mnsClient;
     private readonly AliyunMnsConfiguration _config;
     private readonly Dictionary<string, AliyunMnsQueue> _queues;
     private bool _isInitialized;
@@ -21,21 +21,21 @@ public class AliyunMnsClient : IQueueClient
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _config = config.Value;
-        _queues = new Dictionary<string, AliyunMnsQueue>();
+        _config = config.Value ?? throw new ArgumentNullException(nameof(config));
+        _queues = [];
         _mnsClient = new MNSClient(
             _config.AccessKeyId,
             _config.AccessKeySecret,
             _config.Endpoint);
     }
 
-    public async Task InitializeAsync(CancellationToken cancellationToken)
+    public void Initialize(CancellationToken cancellationToken)
     {
         if (_isInitialized) return;
 
         try
         {
-            await EnsureQueuesExistAsync(cancellationToken);
+            EnsureQueuesExistAsync(cancellationToken);
             _isInitialized = true;
         }
         catch (MNSException ex)
@@ -75,8 +75,8 @@ public class AliyunMnsClient : IQueueClient
             return new QueueHealth(
                 true,
                 "Healthy",
-                (int)attributes.Attributes.ActiveMessages,
-                (int)attributes.Attributes.InactiveMessages
+                attributes.Attributes.ActiveMessages,
+                attributes.Attributes.InactiveMessages
                 );
         }
         catch (MNSException ex)
@@ -86,7 +86,7 @@ public class AliyunMnsClient : IQueueClient
         }
     }
 
-    private async Task EnsureQueuesExistAsync(CancellationToken cancellationToken)
+    private void EnsureQueuesExistAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -101,12 +101,12 @@ public class AliyunMnsClient : IQueueClient
             };
 
             // Create DLQ first
-            var deadLetterQueue = await CreateQueueIfNotExistsAsync(
+            var deadLetterQueue = CreateQueueIfNotExistsAsync(
                 _config.DeadLetterQueueName,
                 new CreateQueueRequest(_config.DeadLetterQueueName, queueAttributes),
                 cancellationToken);
 
-            var mainQueue = await CreateQueueIfNotExistsAsync(
+            var mainQueue = CreateQueueIfNotExistsAsync(
                 _config.QueueName,
                 new CreateQueueRequest(_config.QueueName, queueAttributes),
                 cancellationToken);
@@ -123,21 +123,37 @@ public class AliyunMnsClient : IQueueClient
         }
     }
 
-    private async Task<Queue> CreateQueueIfNotExistsAsync(
+    private Queue CreateQueueIfNotExistsAsync(
         string queueName,
         CreateQueueRequest request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(queueName);
         var queue = _mnsClient.GetNativeQueue(queueName);
+
         try
         {
-            await Task.Run(() => queue.GetAttributes(), cancellationToken);
+            queue.GetAttributes(); // Sync operation - but direct
             _logger.LogInformation("Queue {QueueName} already exists", queueName);
         }
         catch (MNSException ex) when (ex.ErrorCode == "QueueNotExist")
         {
             _logger.LogInformation("Creating queue {QueueName}", queueName);
-            await Task.Run(() => _mnsClient.CreateQueue(request), cancellationToken);
+            queue = _mnsClient.CreateQueue(request);
+
+            // Verify queue was created
+            try
+            {
+                queue.GetAttributes();
+            }
+            catch (MNSException verifyEx)
+            {
+                throw new QueueOperationException($"Failed to verify queue {queueName} after creation", verifyEx);
+            }
+        }
+        catch (MNSException ex)
+        {
+            throw new QueueOperationException($"Unexpected error with queue {queueName}", ex);
         }
 
         return queue;

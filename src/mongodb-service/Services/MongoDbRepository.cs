@@ -24,7 +24,7 @@ public class MongoDbRepository : IMongoDbRepository
         _logger = logger;
         _client = client;
         _databaseName = settings.Value.DatabaseName;
-        _staleTaskTimeout = settings.Value.StaleTaskTimeout;
+        _staleTaskTimeout = settings.Value.GetStaleTaskTimeout();
     }
 
     private IMongoCollection<TaskEntity> GetCollection()
@@ -148,20 +148,23 @@ public class MongoDbRepository : IMongoDbRepository
         await collection.UpdateOneAsync(filter, update);
     }
 
-    public async Task<IEnumerable<TaskEntity>> GetStalledTasksAsync(TimeSpan threshold, string currentWorkerId)
+    public async Task<IEnumerable<TaskEntity>> GetStalledTasksAsync(
+        TimeSpan threshold,
+        string podId)
     {
+        var staleCutoff = DateTime.UtcNow.Subtract(
+            _staleTaskTimeout);
         var collection = GetCollection();
-        var staleCutoff = DateTime.UtcNow.Subtract(threshold);
 
         var filter = Builders<TaskEntity>.Filter.And(
             Builders<TaskEntity>.Filter.Eq(x => x.Status, JobTaskStatus.Running),
             Builders<TaskEntity>.Filter.Or(
                 Builders<TaskEntity>.Filter.And(
-                    Builders<TaskEntity>.Filter.Eq(x => x.WorkerPodId, currentWorkerId),
+                    Builders<TaskEntity>.Filter.Eq(x => x.WorkerPodId, podId),
                     Builders<TaskEntity>.Filter.Lt(x => x.LastHeartbeat, staleCutoff)
                 ),
                 Builders<TaskEntity>.Filter.And(
-                    Builders<TaskEntity>.Filter.Ne(x => x.WorkerPodId, currentWorkerId),
+                    Builders<TaskEntity>.Filter.Ne(x => x.WorkerPodId, podId),
                     Builders<TaskEntity>.Filter.Lt(x => x.LastHeartbeat, staleCutoff.Subtract(threshold))
                 )
             )

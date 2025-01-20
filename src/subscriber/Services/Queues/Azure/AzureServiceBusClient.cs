@@ -26,9 +26,9 @@ public class AzureServiceBusClient : IQueueClient
         _client = new ServiceBusClient(_config.ConnectionString);
     }
 
-    public Task InitializeAsync(CancellationToken cancellationToken)
+    public void Initialize(CancellationToken cancellationToken)
     {
-        if (_isInitialized) return Task.CompletedTask;
+        if (_isInitialized) return;
 
         try
         {
@@ -44,7 +44,6 @@ public class AzureServiceBusClient : IQueueClient
             }
 
             _isInitialized = true;
-            return Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -80,8 +79,8 @@ public class AzureServiceBusClient : IQueueClient
             return new QueueHealth(
                 IsHealthy: true,
                 Status: "Healthy",
-                ActiveMessageCount: (int)queueProperties.Value.ActiveMessageCount,
-                DeadLetterMessageCount: (int)queueProperties.Value.DeadLetterMessageCount);
+                ActiveMessageCount: queueProperties.Value.ActiveMessageCount,
+                DeadLetterMessageCount: queueProperties.Value.DeadLetterMessageCount);
         }
         catch (Exception ex)
         {

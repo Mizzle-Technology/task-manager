@@ -2,8 +2,11 @@ namespace mongodb_service.Configuration;
 
 public class MongoDbSettings
 {
-    public required string ConnectionString { get; set; }
-    public required string DatabaseName { get; set; }
-    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
-    public TimeSpan StaleTaskTimeout { get; set; } = TimeSpan.FromMinutes(5);
+    public string ConnectionString { get; set; } = string.Empty;
+    public string DatabaseName { get; set; } = string.Empty;
+    public string StaleTaskTimeout { get; set; } = "00:05:00";
+    public string HeartbeatInterval { get; set; } = "00:00:30";
+
+    public TimeSpan GetStaleTaskTimeout() => TimeSpan.Parse(StaleTaskTimeout);
+    public TimeSpan GetHeartbeatInterval() => TimeSpan.Parse(HeartbeatInterval);
 }
