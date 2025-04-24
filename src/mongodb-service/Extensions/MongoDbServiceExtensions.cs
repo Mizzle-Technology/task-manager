@@ -2,7 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using mongodb_service.Configuration;
-using mongodb_service.Services;
+using mongodb_service.Repositories;
 using MongoDB.Driver;
 
 namespace mongodb_service.Extensions;

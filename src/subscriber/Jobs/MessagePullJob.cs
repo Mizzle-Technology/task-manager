@@ -2,7 +2,7 @@ using Quartz;
 using subscriber.Services.Queues;
 using subscriber.Services.Queues.Aliyun;
 using Microsoft.Extensions.Options;
-using mongodb_service.Services;
+using mongodb_service.Repositories;
 using mongodb_service.Models;
 using Polly;
 using Polly.Retry;

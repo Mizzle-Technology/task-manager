@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using mongodb_service.Configuration;
 using mongodb_service.Models;
-using mongodb_service.Services;
+using mongodb_service.Repositories;
 using mongodb_service.tests.Infrastructure;
 using Moq;
 using Xunit;
@@ -16,7 +16,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Polly;
 
-namespace mongodb_service.tests.Services;
+namespace mongodb_service.tests.Repositories;
 
 [Collection("MongoDB Collection")]
 public class MongoDbRepositoryTests : IAsyncLifetime

@@ -1,49 +1,43 @@
-using mongodb_service.Configuration;
-using Testcontainers.MongoDb;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
 using MongoDB.Driver;
+using mongodb_service.Configuration;
+using DotNet.Testcontainers.Configurations;
 
-namespace mongodb_service.tests.Infrastructure;
+namespace MongoDB.Service.Tests.Infrastructure;
 
 public class MongoDbTestContainer : IAsyncDisposable
 {
-    private readonly MongoDbContainer _container;
-    private string? _connectionString;
-    private const string Username = "root";
-    private const string Password = "example";
-
-    public string ConnectionString
-    {
-        get
-        {
-            if (_connectionString == null)
-                throw new InvalidOperationException("Container not initialized. Call InitializeAsync first.");
-            return _connectionString;
-        }
-    }
+    private readonly IContainer _container;
+    private static readonly string DbName = Guid.NewGuid().ToString();
 
     public MongoDbTestContainer()
     {
-        _container = new MongoDbBuilder()
+        var mongoDbContainerBuilder = new ContainerBuilder()
+            .WithName($"mongodb-{Guid.NewGuid()}")
             .WithImage("mongo:6.0")
-            .WithEnvironment("MONGO_INITDB_ROOT_USERNAME", Username)
-            .WithEnvironment("MONGO_INITDB_ROOT_PASSWORD", Password)
+            .WithCommand("--replSet", "rs0")
             .WithPortBinding(27017, true)
-            .WithDockerEndpoint("unix:///var/run/docker.sock")
-            .Build();
+            .WithEnvironment(new Dictionary<string, string>
+            {
+                ["MONGO_INITDB_ROOT_USERNAME"] = "admin",
+                ["MONGO_INITDB_ROOT_PASSWORD"] = "password",
+                ["MONGO_INITDB_DATABASE"] = DbName
+            })
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(27017));
+
+        _container = mongoDbContainerBuilder.Build();
     }
 
     public async Task InitializeAsync()
     {
         await _container.StartAsync();
-        var baseConnectionString = _container.GetConnectionString();
-        // Construct connection string with auth credentials
-        var builder = new MongoUrlBuilder(baseConnectionString)
-        {
-            Username = Username,
-            Password = Password,
-            AuthenticationSource = "admin"  // Important for root user authentication
-        };
-        _connectionString = builder.ToString();
+
+        var mongoClient = new MongoClient(ConnectionString);
+        await mongoClient.GetDatabase("admin").RunCommandAsync<dynamic>(new MongoDB.Bson.BsonDocument("ping", 1));
     }
 
     public async ValueTask DisposeAsync()
@@ -51,13 +45,31 @@ public class MongoDbTestContainer : IAsyncDisposable
         await _container.DisposeAsync();
     }
 
-    public MongoDbSettings GetMongoDbSettings()
+    public string Host => _container.Hostname;
+
+    public int Port => _container.GetMappedPublicPort(27017);
+
+    public string ConnectionString
+    {
+        get
+        {
+            var builder = new MongoUrlBuilder
+            {
+                Server = new MongoServerAddress(Host, Port),
+                Username = "admin",
+                Password = "password",
+                DatabaseName = DbName
+            };
+            return builder.ToMongoUrl().ToString();
+        }
+    }
+
+    public MongoDbSettings GetSettings()
     {
         return new MongoDbSettings
         {
             ConnectionString = ConnectionString,
-            DatabaseName = "test-db",
-            StaleTaskTimeout = TimeSpan.FromMinutes(5).ToString()
+            DatabaseName = DbName
         };
     }
 }
