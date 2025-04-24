@@ -1,11 +1,12 @@
 using Quartz;
 using subscriber.Services.Queues;
 using subscriber.Services.Queues.Aliyun;
-using mongodb_service.Models;
+using Microsoft.Extensions.Options;
 using mongodb_service.Services;
+using mongodb_service.Models;
 using Polly;
 using Polly.Retry;
-using Microsoft.Extensions.Options;
+
 namespace subscriber.Jobs;
 
 public record Message(

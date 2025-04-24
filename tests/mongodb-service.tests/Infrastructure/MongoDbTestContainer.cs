@@ -1,10 +1,5 @@
-using Microsoft.Extensions.Options;
 using mongodb_service.Configuration;
 using Testcontainers.MongoDb;
-using Microsoft.Extensions.Configuration;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Containers;
-using DotNet.Testcontainers.Configurations;
 using MongoDB.Driver;
 
 namespace mongodb_service.tests.Infrastructure;
@@ -62,7 +57,7 @@ public class MongoDbTestContainer : IAsyncDisposable
         {
             ConnectionString = ConnectionString,
             DatabaseName = "test-db",
-            StaleTaskTimeout = TimeSpan.FromMinutes(5)
+            StaleTaskTimeout = TimeSpan.FromMinutes(5).ToString()
         };
     }
 }

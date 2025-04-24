@@ -1,0 +1,197 @@
+---
+description:
+globs: *.cs
+alwaysApply: false
+---
+# C# Coding Standards and Best Practices
+
+## Naming Conventions
+
+- Use **PascalCase** for class names, method names, properties, public fields, and namespaces
+- Use **camelCase** for local variables, parameters, and private fields
+- Prefix private fields with an underscore (`_privateField`)
+- Use descriptive names that reveal intent, avoid abbreviations and single-letter variables except for simple loop iterators
+- Interface names should start with the letter "I" (`IRepository`)
+- Use noun or noun phrases for class names (`Customer`, `OrderProcessor`)
+- Use verb or verb phrases for method names (`CalculateTotal`, `ProcessPayment`)
+
+## Code Organization
+
+- Organize namespaces to reflect project structure
+- Order class members: private fields, constructors, properties, methods
+- Limit file length to 1000 lines; consider refactoring if exceeded
+- Limit method length to 50 lines; consider refactoring if exceeded
+- Use regions sparingly, prefer logical organization by private/public scope and functionality
+
+## Formatting
+
+- Use 4 spaces for indentation (not tabs)
+- One statement per line
+- One declaration per line
+- Keep lines under 120 characters
+- Use braces for all control structures, even single-line statements
+- Place opening braces on the same line as the declaration
+- Place closing braces on a new line
+- Add a space before opening parentheses, except in method calls and declarations
+- Add spaces around operators (`a + b`, not `a+b`)
+
+## Language Usage
+
+- Use `var` when the type is obvious from the right side of the assignment
+- Prefer string interpolation over string.Format (`$"Hello {name}"`)
+- Use null conditional operators (`?.` and `??`) to handle potential nulls
+- Use expression-bodied members for simple methods and properties
+- Use pattern matching for type checking and casting
+- Use `nameof()` instead of magic strings for property names
+- Avoid using `dynamic` unless absolutely necessary
+- Prefer `async`/`await` over direct Task manipulation
+
+## Error Handling
+
+- Use exception handling (`try`/`catch`/`finally`) only for exceptional cases, not for control flow
+- Always include specific exception types in catch blocks, avoid catching generic `Exception`
+- Use `ArgumentNullException` for null parameter validation
+- Use `ArgumentException` for invalid parameter validation
+- Include contextual information in exception messages
+- Don't swallow exceptions without logging or handling
+
+## SOLID Principles
+
+- **Single Responsibility Principle**: A class should have only one reason to change
+- **Open/Closed Principle**: Classes should be open for extension but closed for modification
+- **Liskov Substitution Principle**: Subtypes must be substitutable for their base types
+- **Interface Segregation Principle**: Clients should not depend on interfaces they don't use
+- **Dependency Inversion Principle**: Depend on abstractions, not implementations
+
+## Performance
+
+- Prefer `StringBuilder` for complex string concatenation
+- Use `IEnumerable<T>` for method returns when possible to enable deferred execution
+- Use `List<T>` for collections that need to be modified
+- Avoid unnecessary boxing/unboxing operations
+- Implement `IDisposable` for classes that use unmanaged resources
+- Use `using` statements for disposable resources
+
+## Documentation
+
+- Use XML documentation comments for public APIs
+- Include summary, parameter, returns, and exception documentation
+- Document "why" in comments, not "what" (code should be self-explanatory)
+- Keep comments updated when code changes
+- Use `// TODO:` comments for code that needs to be revisited
+
+## Testing
+
+- Write unit tests for all public methods
+- Follow Arrange-Act-Assert pattern in tests
+- Keep tests independent and idempotent
+- Mock external dependencies
+- Test both positive and negative cases
+- Name tests clearly: `[MethodName]_[Scenario]_[ExpectedBehavior]`
+
+## Security
+
+- Validate all user input
+- Use parameterized queries to prevent SQL injection
+- Don't store sensitive information in plain text
+- Implement proper authentication and authorization
+- Use secure communication protocols (HTTPS)
+- Follow the principle of least privilege
+
+## Dependencies
+
+- Minimize external dependencies
+- Use dependency injection for loose coupling
+- Keep third-party libraries updated
+- Prefer NuGet packages over manual reference management
+
+## Microservices Architecture
+
+- Design microservices around business capabilities, not technical functions
+- Implement service boundaries based on domain-driven design principles
+- Keep microservices small and focused on a single responsibility
+- Use asynchronous communication between services when possible
+- Implement resilience patterns (Circuit Breaker, Retry, Bulkhead) for service-to-service communication
+- Ensure each microservice has its own data storage
+- Use message brokers (RabbitMQ, Kafka) for event-driven communication
+- Implement API gateways for client-facing services
+- Use service discovery mechanisms for dynamic service location
+- Implement distributed tracing for troubleshooting across service boundaries
+- Design for failure - anticipate and handle service failures gracefully
+- Use health checks and monitoring for each microservice
+
+## Dependency Injection
+
+- Use constructor injection as the primary method for dependency injection
+- Register services with appropriate lifetimes (Singleton, Scoped, Transient)
+- Avoid service locator pattern in favor of explicit dependency injection
+- Use `IServiceCollection` extensions for modular service registration
+- Create extension methods for registering related services together
+- Implement factories for complex object creation
+- Consider using decorators for cross-cutting concerns
+- Prefer injecting interfaces over concrete implementations
+- Keep services focused and avoid "god" services with too many responsibilities
+- Use named options pattern for configuration injection
+- Avoid static access to services
+- Consider using scrutor for assembly scanning and decoration
+
+## Data Models
+
+- Separate data models by purpose (DTO, Entity, ViewModel)
+- Use Data Transfer Objects (DTOs) for API requests and responses
+- Implement validation using DataAnnotations or FluentValidation
+- Create explicit mapping profiles with AutoMapper or Mapster
+- Keep entity models focused on domain representation
+- Use value objects for complex value types
+- Implement proper encapsulation in domain entities
+- Use navigation properties appropriately in entity models
+- Consider using records for immutable data structures
+- Implement IEquatable<T> for value objects
+- Use shadow properties for audit information
+- Keep models clean of UI or persistence concerns
+- Document complex relationships between models
+
+## API Design
+
+- Follow RESTful conventions for resource naming and operations
+- Use appropriate HTTP status codes and methods
+- Implement consistent versioning strategy (URL, header, or content negotiation)
+- Use meaningful HTTP response codes
+- Implement proper content negotiation
+- Document APIs with Swagger/OpenAPI
+- Implement proper error responses with problem details (RFC 7807)
+- Use pagination for large collections
+- Implement HATEOAS for discoverability when appropriate
+- Use JSON as the primary serialization format
+- Implement proper rate limiting and throttling
+- Consider using GraphQL for complex data requirements
+
+## Logging and Monitoring
+
+- Use structured logging (Serilog, NLog) for better searchability
+- Log contextual information with every log entry
+- Use appropriate log levels (Debug, Info, Warning, Error, Fatal)
+- Implement correlation IDs for tracing requests across services
+- Log start and end of long-running operations
+- Avoid logging sensitive information
+- Implement centralized logging solution
+- Set up alerts for critical errors and performance thresholds
+- Use Application Performance Monitoring (APM) tools
+- Log metrics for key business operations
+- Implement health checks for services and dependencies
+- Use logging abstraction (ILogger) to avoid direct dependency on logging frameworks
+
+## Code Cleanliness
+
+- Remove unused using directives to reduce clutter and improve compilation speed
+- Enable "Remove Unnecessary Usings" in IDE settings (Visual Studio/Rider/VS Code)
+- Avoid unused variables, parameters, and methods
+- Enable nullable reference types to catch potential null reference issues
+- Set compiler warnings as errors for unused variables (CS0168, CS0219) and parameters (CS0168)
+- For required parameters that are temporarily unused, use the discard operator (`_`) or prefix with `unused`
+- Use code analyzers like StyleCop, SonarLint, or FxCop to enforce code cleanliness
+- Configure .editorconfig to enforce code cleanliness rules project-wide
+- Use "using static" for frequently used static classes rather than multiple static imports
+- Organize using directives in logical groups: System namespaces first, then third-party, then project-specific
+- Remove commented-out code; rely on source control for historical code instead
+- Remove debug code (Console.WriteLine, Debug.Log, etc.) before committing

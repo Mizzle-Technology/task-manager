@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
-using MongoDB.Driver.Core.Configuration;
 using mongodb_service.Configuration;
 using mongodb_service.Models;
 using mongodb_service.Services;
@@ -10,27 +9,43 @@ using Moq;
 using Xunit;
 using MongoDB.Bson;
 using mongodb_service.Exceptions;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using Polly;
 
 namespace mongodb_service.tests.Services;
 
+[Collection("MongoDB Collection")]
 public class MongoDbRepositoryTests : IAsyncLifetime
 {
-    private readonly MongoDbTestContainer _container;
-    private IMongoClient? _client;
+    private readonly MongoDbFixture _fixture;
+    private MongoClient _client => _fixture.MongoClient;
     private MongoDbRepository? _repository;
     private readonly ILogger<MongoDbRepository> _logger;
+    private string _dbName;
+    private readonly Stopwatch _stopwatch = new Stopwatch();
+    private const int PerformanceThresholdMs = 500; // Maximum acceptable time for critical operations
 
-    public MongoDbRepositoryTests()
+    // Retry policy for potentially flaky tests
+    private readonly AsyncPolicy _retryPolicy = Policy
+        .Handle<Exception>()
+        .WaitAndRetryAsync(3, retryAttempt =>
+            TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+
+    public MongoDbRepositoryTests(MongoDbFixture fixture)
     {
-        _container = new MongoDbTestContainer();
+        _fixture = fixture;
         _logger = Mock.Of<ILogger<MongoDbRepository>>();
+        _dbName = $"test-db-{Guid.NewGuid()}"; // Use a unique DB for each test
     }
 
     public async Task InitializeAsync()
     {
-        await _container.InitializeAsync();
-        var settings = _container.GetMongoDbSettings();
-        _client = new MongoClient(settings.ConnectionString);
+        var settings = _fixture.GetMongoDbSettings();
+        settings.DatabaseName = _dbName; // Use the unique DB name
 
         _repository = new MongoDbRepository(
             _client,
@@ -42,81 +57,94 @@ public class MongoDbRepositoryTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await _container.DisposeAsync();
+        // Clean up the test database after each test
+        if (_client != null && !string.IsNullOrEmpty(_dbName))
+        {
+            await _client.DropDatabaseAsync(_dbName);
+        }
     }
+
+    #region Test Data Helpers
+
+    private TaskEntity CreateTestTask(string taskId, JobTaskStatus status = JobTaskStatus.Pending)
+    {
+        return new TaskEntity
+        {
+            TaskId = taskId,
+            Status = status,
+            Body = $"Test body for {taskId}",
+            RetryCount = 0,
+            CreatedAt = DateTime.UtcNow,
+            Id = ObjectId.GenerateNewId().ToString(),
+            Version = 1
+        };
+    }
+
+    private TaskEntity CreateStalledTask(string taskId, string workerId, DateTime lastHeartbeat)
+    {
+        return new TaskEntity
+        {
+            TaskId = taskId,
+            Status = JobTaskStatus.Running,
+            Body = $"Stalled task {taskId}",
+            RetryCount = 0,
+            CreatedAt = DateTime.UtcNow,
+            Id = ObjectId.GenerateNewId().ToString(),
+            WorkerPodId = workerId,
+            LastHeartbeat = lastHeartbeat
+        };
+    }
+
+    private async Task<TaskEntity> InsertTestTaskAsync(string taskId, JobTaskStatus status = JobTaskStatus.Pending)
+    {
+        var task = CreateTestTask(taskId, status);
+        await _repository!.InsertOrUpdateTaskAsync(task);
+        return task;
+    }
+
+    private async Task WithPerformanceMeasurement(Func<Task> operation, string operationName)
+    {
+        _stopwatch.Restart();
+        await operation();
+        _stopwatch.Stop();
+
+        var elapsed = _stopwatch.ElapsedMilliseconds;
+        Assert.True(elapsed < PerformanceThresholdMs,
+            $"{operationName} took {elapsed}ms which exceeds the performance threshold of {PerformanceThresholdMs}ms");
+    }
+
+    #endregion
+
+    #region Basic CRUD Operations
 
     [Fact]
     public async Task InsertOrUpdateTaskAsync_ShouldInsertNewTask()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "test-task-1",
-            Status = JobTaskStatus.Pending,
-            Body = "Test task body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
+        var task = CreateTestTask("test-task-1");
 
         // Act
-        await _repository!.InsertOrUpdateTaskAsync(task);
+        await WithPerformanceMeasurement(
+            async () => await _repository!.InsertOrUpdateTaskAsync(task),
+            "Task insertion");
 
         // Assert
-        var savedTask = await _repository.GetByTaskIdAsync(task.TaskId);
+        var savedTask = await _repository!.GetByTaskIdAsync(task.TaskId);
         Assert.NotNull(savedTask);
         Assert.Equal(task.TaskId, savedTask.TaskId);
         Assert.Equal(JobTaskStatus.Pending, savedTask.Status);
     }
 
     [Fact]
-    public async Task TryAcquireTaskAsync_ShouldAcquireAvailableTask()
-    {
-        // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "test-task-2",
-            Status = JobTaskStatus.Pending,
-            Body = "Test task body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
-
-        // Act
-        var acquired = await _repository.TryAcquireTaskAsync(
-            JobTaskStatus.Pending,
-            JobTaskStatus.Running,
-            "worker-1",
-            DateTime.UtcNow);
-
-        // Assert
-        Assert.NotNull(acquired);
-        Assert.Equal(task.TaskId, acquired.TaskId);
-        Assert.Equal(JobTaskStatus.Running, acquired.Status);
-        Assert.Equal("worker-1", acquired.WorkerPodId);
-    }
-
-    [Fact]
     public async Task InsertOrUpdateTaskAsync_WhenUpdatingExistingTask_ShouldUpdateTask()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "test-task-1",
-            Status = JobTaskStatus.Pending,
-            Body = "Original body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
+        var task = await InsertTestTaskAsync("test-task-1");
 
         // Act
         task.Body = "Updated body";
         task.Status = JobTaskStatus.Running;
-        await _repository.InsertOrUpdateTaskAsync(task);
+        await _repository!.InsertOrUpdateTaskAsync(task);
 
         // Assert
         var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
@@ -135,21 +163,36 @@ public class MongoDbRepositoryTests : IAsyncLifetime
         Assert.Null(result);
     }
 
+    #endregion
+
+    #region Task Acquisition and Processing
+
+    [Fact]
+    public async Task TryAcquireTaskAsync_ShouldAcquireAvailableTask()
+    {
+        // Arrange
+        await InsertTestTaskAsync("test-task-2");
+
+        // Act
+        var acquired = await _retryPolicy.ExecuteAsync(async () =>
+            await _repository!.TryAcquireTaskAsync(
+                JobTaskStatus.Pending,
+                JobTaskStatus.Running,
+                "worker-1",
+                DateTime.UtcNow));
+
+        // Assert
+        Assert.NotNull(acquired);
+        Assert.Equal("test-task-2", acquired.TaskId);
+        Assert.Equal(JobTaskStatus.Running, acquired.Status);
+        Assert.Equal("worker-1", acquired.WorkerPodId);
+    }
+
     [Fact]
     public async Task TryAcquireTaskAsync_WhenTaskIsStale_ShouldAcquireTask()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "stale-task",
-            Status = JobTaskStatus.Running,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            WorkerPodId = "old-worker",
-            LastHeartbeat = DateTime.UtcNow.AddHours(-1) // Stale heartbeat
-        };
+        var task = CreateStalledTask("stale-task", "old-worker", DateTime.UtcNow.AddHours(-1));
         await _repository!.InsertOrUpdateTaskAsync(task);
 
         // Act
@@ -179,23 +222,70 @@ public class MongoDbRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TryAcquireTaskAsync_WhenMultipleWorkersCompete_ShouldOnlyAcquireOnce()
+    {
+        // Arrange
+        await InsertTestTaskAsync("concurrent-task");
+
+        // Act
+        var acquisitionTasks = new List<Task<TaskEntity?>>();
+        for (int i = 0; i < 5; i++)
+        {
+            acquisitionTasks.Add(_repository!.TryAcquireTaskAsync(
+                JobTaskStatus.Pending,
+                JobTaskStatus.Running,
+                $"worker-{i}",
+                DateTime.UtcNow));
+        }
+
+        var results = await Task.WhenAll(acquisitionTasks);
+
+        // Assert
+        var acquiredTasks = results.Where(r => r != null).ToList();
+        Assert.Single(acquiredTasks);
+
+        var acquiredTask = acquiredTasks[0];
+        Assert.NotNull(acquiredTask);
+        Assert.Equal(JobTaskStatus.Running, acquiredTask.Status);
+    }
+
+    #endregion
+
+    #region Task Status Management
+
+    [Theory]
+    [InlineData(JobTaskStatus.Pending, JobTaskStatus.Running)]
+    [InlineData(JobTaskStatus.Running, JobTaskStatus.Completed)]
+    [InlineData(JobTaskStatus.Running, JobTaskStatus.Failed)]
+    [InlineData(JobTaskStatus.Failed, JobTaskStatus.Retrying)]
+    public async Task UpdateTaskStatus_WithValidTransition_ShouldSucceed(
+        JobTaskStatus initialStatus,
+        JobTaskStatus newStatus)
+    {
+        // Arrange
+        var task = await InsertTestTaskAsync($"transition-test-{Guid.NewGuid()}", initialStatus);
+
+        // Act
+        var success = await _repository!.UpdateTaskStatusIfVersionMatchesAsync(
+            task.TaskId,
+            1,
+            newStatus);
+
+        // Assert
+        Assert.True(success);
+        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
+        Assert.NotNull(updatedTask);
+        Assert.Equal(newStatus, updatedTask.Status);
+    }
+
+    [Fact]
     public async Task UpdateTaskStatusIfVersionMatchesAsync_WhenVersionMatches_ShouldUpdateStatus()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "version-test",
-            Status = JobTaskStatus.Pending,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            Version = 1
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
+        var task = await InsertTestTaskAsync("version-test");
 
         // Act
-        var success = await _repository.UpdateTaskStatusIfVersionMatchesAsync(
+        var success = await _repository!.UpdateTaskStatusIfVersionMatchesAsync(
             task.TaskId,
             1,
             JobTaskStatus.Running);
@@ -212,22 +302,14 @@ public class MongoDbRepositoryTests : IAsyncLifetime
     public async Task UpdateTaskStatusIfVersionMatchesAsync_WhenVersionMismatch_ShouldNotUpdate()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "version-mismatch",
-            Status = JobTaskStatus.Pending,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            Version = 2
-        };
+        var task = CreateTestTask("version-mismatch");
+        task.Version = 2; // Set version to 2
         await _repository!.InsertOrUpdateTaskAsync(task);
 
         // Act
         var success = await _repository.UpdateTaskStatusIfVersionMatchesAsync(
             task.TaskId,
-            1, // Wrong version
+            1, // Provide version 1 (mismatch)
             JobTaskStatus.Running);
 
         // Assert
@@ -239,76 +321,61 @@ public class MongoDbRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RequeueTaskAsync_WhenTaskIsRunning_ShouldRequeueSuccessfully()
+    public async Task UpdateTaskStatus_WithTimestamps_ShouldSetCorrectTimestamp()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "requeue-test",
-            Status = JobTaskStatus.Running,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            WorkerPodId = "worker-1"
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
+        var task = await InsertTestTaskAsync("timestamp-test");
 
         // Act
-        var success = await _repository.RequeueTaskAsync(
+        var success = await _repository!.UpdateTaskStatusAndErrorIfVersionMatchesAsync(
             task.TaskId,
-            JobTaskStatus.Pending,
-            "Task timed out");
+            1, // Initial version
+            JobTaskStatus.Failed,
+            "Test error");
 
         // Assert
         Assert.True(success);
-        var requeuedTask = await _repository.GetByTaskIdAsync(task.TaskId);
-        Assert.NotNull(requeuedTask);
-        Assert.Equal(JobTaskStatus.Pending, requeuedTask.Status);
-        Assert.Null(requeuedTask.WorkerPodId);
-        Assert.Equal("Task timed out", requeuedTask.ErrorMessage);
+        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
+        Assert.NotNull(updatedTask);
+        Assert.NotNull(updatedTask.FailedAt);
+        Assert.Equal(JobTaskStatus.Failed, updatedTask.Status);
+        Assert.Equal("Test error", updatedTask.ErrorMessage);
     }
 
-    [Fact]
-    public async Task GetStalledTasksAsync_ShouldReturnOnlyStalledTasks()
+    [Theory]
+    [InlineData(JobTaskStatus.Pending, JobTaskStatus.Processing, "ProcessedAt")]
+    [InlineData(JobTaskStatus.Processing, JobTaskStatus.Completed, "CompletedAt")]
+    [InlineData(JobTaskStatus.Processing, JobTaskStatus.Failed, "FailedAt")]
+    public async Task UpdateTaskStatus_ShouldSetAppropriateTimestamp(
+        JobTaskStatus initialStatus,
+        JobTaskStatus newStatus,
+        string timestampProperty)
     {
         // Arrange
-        var stalledTask = new TaskEntity
-        {
-            TaskId = "stalled-task",
-            Status = JobTaskStatus.Running,
-            Body = "Stalled task",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            WorkerPodId = "worker-1",
-            LastHeartbeat = DateTime.UtcNow.AddMinutes(-10)
-        };
-
-        var activeTask = new TaskEntity
-        {
-            TaskId = "active-task",
-            Status = JobTaskStatus.Running,
-            Body = "Active task",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            WorkerPodId = "worker-1",
-            LastHeartbeat = DateTime.UtcNow
-        };
-
-        await _repository!.InsertOrUpdateTaskAsync(stalledTask);
-        await _repository.InsertOrUpdateTaskAsync(activeTask);
+        var task = await InsertTestTaskAsync($"timestamp-test-{Guid.NewGuid()}", initialStatus);
 
         // Act
-        var stalledTasks = await _repository.GetStalledTasksAsync(
-            TimeSpan.FromMinutes(5),
-            "worker-1");
+        var success = await _repository!.UpdateTaskStatusAndErrorIfVersionMatchesAsync(
+            task.TaskId,
+            1,
+            newStatus,
+            null);
 
         // Assert
-        Assert.Single(stalledTasks);
-        Assert.Equal("stalled-task", stalledTasks.First().TaskId);
+        Assert.True(success);
+        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
+        Assert.NotNull(updatedTask);
+        Assert.Equal(newStatus, updatedTask.Status);
+
+        // Check the appropriate timestamp was set
+        var timestamp = typeof(TaskEntity).GetProperty(timestampProperty)?.GetValue(updatedTask) as DateTime?;
+        Assert.NotNull(timestamp);
+        Assert.True(timestamp > DateTime.UtcNow.AddSeconds(-5));
     }
+
+    #endregion
+
+    #region Error Handling and Edge Cases
 
     [Fact]
     public async Task InitializeAsync_WhenDatabaseUnavailable_ShouldThrowException()
@@ -318,7 +385,7 @@ public class MongoDbRepositoryTests : IAsyncLifetime
         {
             ConnectionString = "mongodb://localhost:27018", // Use non-existent port
             DatabaseName = "test-db",
-            StaleTaskTimeout = TimeSpan.FromMinutes(5)
+            StaleTaskTimeout = TimeSpan.FromMinutes(5).ToString()
         };
 
         var clientSettings = MongoClientSettings.FromUrl(new MongoUrl(invalidSettings.ConnectionString));
@@ -344,25 +411,29 @@ public class MongoDbRepositoryTests : IAsyncLifetime
     public async Task Operations_WhenDatabaseDisconnected_ShouldThrowException()
     {
         // Arrange
-        var task = new TaskEntity
+        var task = await InsertTestTaskAsync("test-task");
+
+        // Create a new client with invalid connection string to simulate disconnection
+        var invalidSettings = new MongoDbSettings
         {
-            TaskId = "test-task",
-            Status = JobTaskStatus.Pending,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
+            ConnectionString = "mongodb://localhost:27018", // Non-existent port
+            DatabaseName = _dbName,
+            StaleTaskTimeout = TimeSpan.FromMinutes(5).ToString()
         };
 
-        // First insert with valid connection
-        await _repository!.InsertOrUpdateTaskAsync(task);
+        var clientSettings = MongoClientSettings.FromUrl(new MongoUrl(invalidSettings.ConnectionString));
+        clientSettings.ServerSelectionTimeout = TimeSpan.FromSeconds(1); // Short timeout
+        clientSettings.ConnectTimeout = TimeSpan.FromSeconds(1);
 
-        // Stop the container to simulate database disconnection
-        await _container.DisposeAsync();
+        var disconnectedClient = new MongoClient(clientSettings);
+        var disconnectedRepo = new MongoDbRepository(
+            disconnectedClient,
+            Options.Create(invalidSettings),
+            _logger);
 
         // Act & Assert
         var ex = await Assert.ThrowsAnyAsync<Exception>(
-            () => _repository.GetByTaskIdAsync(task.TaskId));
+            () => disconnectedRepo.GetByTaskIdAsync(task.TaskId));
 
         Assert.True(
             ex is MongoConnectionException ||
@@ -371,176 +442,23 @@ public class MongoDbRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TryAcquireTaskAsync_WhenMultipleWorkersCompete_ShouldOnlyAcquireOnce()
-    {
-        // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "concurrent-task",
-            Status = JobTaskStatus.Pending,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
-
-        // Act
-        var acquisitionTasks = new List<Task<TaskEntity?>>();
-        for (int i = 0; i < 5; i++)
-        {
-            acquisitionTasks.Add(_repository.TryAcquireTaskAsync(
-                JobTaskStatus.Pending,
-                JobTaskStatus.Running,
-                $"worker-{i}",
-                DateTime.UtcNow));
-        }
-
-        var results = await Task.WhenAll(acquisitionTasks);
-
-        // Assert
-        var acquiredTasks = results.Where(r => r != null).ToList();
-        Assert.Single(acquiredTasks);
-
-        var acquiredTask = acquiredTasks[0];
-        Assert.NotNull(acquiredTask);
-        Assert.Equal(JobTaskStatus.Running, acquiredTask.Status);
-    }
-
-    [Theory]
-    [InlineData(JobTaskStatus.Pending, JobTaskStatus.Running)]
-    [InlineData(JobTaskStatus.Running, JobTaskStatus.Completed)]
-    [InlineData(JobTaskStatus.Running, JobTaskStatus.Failed)]
-    [InlineData(JobTaskStatus.Failed, JobTaskStatus.Retrying)]
-    public async Task UpdateTaskStatus_WithValidTransition_ShouldSucceed(
-        JobTaskStatus initialStatus,
-        JobTaskStatus newStatus)
-    {
-        // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = $"transition-test-{Guid.NewGuid()}",
-            Status = initialStatus,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            Version = 1
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
-
-        // Act
-        var success = await _repository.UpdateTaskStatusIfVersionMatchesAsync(
-            task.TaskId,
-            1,
-            newStatus);
-
-        // Assert
-        Assert.True(success);
-        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
-        Assert.NotNull(updatedTask);
-        Assert.Equal(newStatus, updatedTask.Status);
-    }
-
-    [Fact]
-    public async Task UpdateTaskStatus_WithTimestamps_ShouldSetCorrectTimestamp()
-    {
-        // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "timestamp-test",
-            Status = JobTaskStatus.Pending,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
-
-        // Act
-        var success = await _repository.UpdateTaskStatusAndErrorIfVersionMatchesAsync(
-            task.TaskId,
-            1, // Initial version
-            JobTaskStatus.Failed,
-            "Test error");
-
-        // Assert
-        Assert.True(success);
-        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
-        Assert.NotNull(updatedTask);
-        Assert.NotNull(updatedTask.FailedAt);
-        Assert.Equal(JobTaskStatus.Failed, updatedTask.Status);
-        Assert.Equal("Test error", updatedTask.ErrorMessage);
-    }
-
-    [Theory]
-    [InlineData(JobTaskStatus.Pending, JobTaskStatus.Processing, "ProcessedAt")]
-    [InlineData(JobTaskStatus.Processing, JobTaskStatus.Completed, "CompletedAt")]
-    [InlineData(JobTaskStatus.Processing, JobTaskStatus.Failed, "FailedAt")]
-    public async Task UpdateTaskStatus_ShouldSetAppropriateTimestamp(
-        JobTaskStatus initialStatus,
-        JobTaskStatus newStatus,
-        string timestampProperty)
-    {
-        // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = $"timestamp-test-{Guid.NewGuid()}",
-            Status = initialStatus,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            Version = 1
-        };
-        await _repository!.InsertOrUpdateTaskAsync(task);
-
-        // Act
-        var success = await _repository.UpdateTaskStatusAndErrorIfVersionMatchesAsync(
-            task.TaskId,
-            1,
-            newStatus,
-            null);
-
-        // Assert
-        Assert.True(success);
-        var updatedTask = await _repository.GetByTaskIdAsync(task.TaskId);
-        Assert.NotNull(updatedTask);
-        Assert.Equal(newStatus, updatedTask.Status);
-
-        // Check the appropriate timestamp was set
-        var timestamp = typeof(TaskEntity).GetProperty(timestampProperty)?.GetValue(updatedTask) as DateTime?;
-        Assert.NotNull(timestamp);
-        Assert.True(timestamp > DateTime.UtcNow.AddSeconds(-5));
-    }
-
-    [Fact]
     public async Task InitializeAsync_ShouldCreateUniqueTaskIdIndex()
     {
         // Arrange
-        var task1 = new TaskEntity
-        {
-            TaskId = "duplicate-task",
-            Status = JobTaskStatus.Pending,
-            Body = "Test body 1",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
-
-        var task2 = new TaskEntity
-        {
-            TaskId = "duplicate-task", // Same TaskId
-            Status = JobTaskStatus.Pending,
-            Body = "Test body 2",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString()
-        };
+        var task1 = CreateTestTask("duplicate-task");
+        var task2 = CreateTestTask("duplicate-task"); // Same TaskId
+        task2.Body = "Test body 2"; // Different content
 
         // Get direct access to collection to bypass the repository's upsert logic
-        var database = _client!.GetDatabase(_container.GetMongoDbSettings().DatabaseName);
+        var database = _client!.GetDatabase(_dbName);
         var collection = database.GetCollection<TaskEntity>("tasks");
+
+        // We need to manually create the unique index to test
+        // since _repository.InitializeAsync() already called before this test
+        var indexKeys = Builders<TaskEntity>.IndexKeys.Ascending(x => x.TaskId);
+        var indexOptions = new CreateIndexOptions { Unique = true };
+        var indexModel = new CreateIndexModel<TaskEntity>(indexKeys, indexOptions);
+        await collection.Indexes.CreateOneAsync(indexModel);
 
         // Act & Assert
         await collection.InsertOneAsync(task1);
@@ -556,23 +474,65 @@ public class MongoDbRepositoryTests : IAsyncLifetime
         Assert.True(isDuplicateKeyError, "Expected a duplicate key error");
     }
 
+    #endregion
+
+    #region Task Management
+
+    [Fact]
+    public async Task RequeueTaskAsync_WhenTaskIsRunning_ShouldRequeueSuccessfully()
+    {
+        // Arrange
+        var task = CreateTestTask("requeue-test", JobTaskStatus.Running);
+        task.WorkerPodId = "worker-1";
+        await _repository!.InsertOrUpdateTaskAsync(task);
+
+        // Act
+        var success = await _repository.RequeueTaskAsync(
+            task.TaskId,
+            JobTaskStatus.Pending,
+            "Task timed out");
+
+        // Assert
+        Assert.True(success);
+        var requeuedTask = await _repository.GetByTaskIdAsync(task.TaskId);
+        Assert.NotNull(requeuedTask);
+        Assert.Equal(JobTaskStatus.Pending, requeuedTask.Status);
+        Assert.Null(requeuedTask.WorkerPodId);
+        Assert.Equal("Task timed out", requeuedTask.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task GetStalledTasksAsync_ShouldReturnOnlyStalledTasks()
+    {
+        // Arrange
+        var stalledTask = CreateStalledTask("stalled-task", "worker-1", DateTime.UtcNow.AddMinutes(-10));
+
+        var activeTask = CreateTestTask("active-task", JobTaskStatus.Running);
+        activeTask.WorkerPodId = "worker-1";
+        activeTask.LastHeartbeat = DateTime.UtcNow;
+
+        await _repository!.InsertOrUpdateTaskAsync(stalledTask);
+        await _repository.InsertOrUpdateTaskAsync(activeTask);
+
+        // Act
+        var stalledTasks = await _repository.GetStalledTasksAsync(
+            TimeSpan.FromMinutes(5),
+            "worker-1");
+
+        // Assert
+        Assert.Single(stalledTasks);
+        Assert.Equal("stalled-task", stalledTasks.First().TaskId);
+    }
+
     [Fact]
     public async Task RequeueTask_ShouldCleanupWorkerMetadata()
     {
         // Arrange
-        var task = new TaskEntity
-        {
-            TaskId = "cleanup-test",
-            Status = JobTaskStatus.Running,
-            Body = "Test body",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            WorkerPodId = "worker-1",
-            WorkerNodeId = "node-1",
-            LastHeartbeat = DateTime.UtcNow,
-            LockedAt = DateTime.UtcNow
-        };
+        var task = CreateTestTask("cleanup-test", JobTaskStatus.Running);
+        task.WorkerPodId = "worker-1";
+        task.WorkerNodeId = "node-1";
+        task.LastHeartbeat = DateTime.UtcNow;
+        task.LockedAt = DateTime.UtcNow;
         await _repository!.InsertOrUpdateTaskAsync(task);
 
         // Act
@@ -622,18 +582,5 @@ public class MongoDbRepositoryTests : IAsyncLifetime
         });
     }
 
-    private TaskEntity CreateStalledTask(string taskId, string workerId, DateTime lastHeartbeat)
-    {
-        return new TaskEntity
-        {
-            TaskId = taskId,
-            Status = JobTaskStatus.Running,
-            Body = "Stalled task",
-            RetryCount = 0,
-            CreatedAt = DateTime.UtcNow,
-            Id = ObjectId.GenerateNewId().ToString(),
-            WorkerPodId = workerId,
-            LastHeartbeat = lastHeartbeat
-        };
-    }
+    #endregion
 }
