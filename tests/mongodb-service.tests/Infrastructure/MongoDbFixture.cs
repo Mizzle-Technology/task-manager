@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using mongodb_service.Configuration;
 using Testcontainers.MongoDb;
 using MongoDB.Driver;
+using MongoDB.Bson;
 using Xunit;
 
 namespace mongodb_service.tests.Infrastructure;
@@ -23,8 +24,6 @@ public class MongoDbFixture : IAsyncLifetime
 				.WithEnvironment("MONGO_INITDB_ROOT_USERNAME", "root")
 				.WithEnvironment("MONGO_INITDB_ROOT_PASSWORD", "example")
 				.WithPortBinding(27017, true)
-				.WithDockerEndpoint("unix:///var/run/docker.sock")
-				.WithReuse(true) // Enable container reuse
 				.Build();
 	}
 
@@ -40,7 +39,35 @@ public class MongoDbFixture : IAsyncLifetime
 			AuthenticationSource = "admin"
 		};
 		_connectionString = builder.ToString();
-		MongoClient = new MongoClient(_connectionString);
+
+		// Add retry logic for MongoDB connection
+		var connected = false;
+		var attempts = 0;
+		Exception? lastException = null;
+
+		while (!connected && attempts < 5)
+		{
+			try
+			{
+				MongoClient = new MongoClient(_connectionString);
+				// Test the connection
+				await MongoClient.GetDatabase("admin").RunCommandAsync<BsonDocument>(new BsonDocument("ping", 1));
+				connected = true;
+				Console.WriteLine("Successfully connected to MongoDB container");
+			}
+			catch (Exception ex)
+			{
+				lastException = ex;
+				attempts++;
+				Console.WriteLine($"MongoDB connection attempt {attempts} failed: {ex.Message}");
+				await Task.Delay(1000); // Wait before retrying
+			}
+		}
+
+		if (!connected)
+		{
+			throw new Exception("Failed to connect to MongoDB after multiple attempts", lastException);
+		}
 	}
 
 	public async Task DisposeAsync()
