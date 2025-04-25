@@ -1,8 +1,10 @@
 using Quartz;
 using subscriber.Jobs;
 using subscriber.Services.Queues.Aliyun;
+using subscriber.Services.Queues.Azure;
 using mongodb_service.Extensions;
 using subscriber.Services.Queues;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,17 +34,31 @@ builder.Services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
 builder.Services.Configure<AliyunMnsConfiguration>(
     builder.Configuration.GetSection("AliyunMns"));
 builder.Services.AddSingleton<IQueueClient, AliyunMnsClient>();
-builder.Services.AddSingleton<IQueueClientFactory>(sp =>
-{
-    var clients = new List<IQueueClient> { sp.GetRequiredService<IQueueClient>() };
-    var factory = new QueueClientFactory(clients);
-    // Initialize the Aliyun client
-    factory.GetClient(QueueProvider.AliyunMNS).Initialize(CancellationToken.None);
-    return factory;
-});
 
 // OR for Azure Service Bus
-// builder.Services.AddSingleton<IMessageQueueService, ServiceBusQueueService>();
+builder.Services.Configure<ServiceBusConfiguration>(
+    builder.Configuration.GetSection("AzureServiceBus")); // You need this section in appsettings
+builder.Services.AddSingleton<AzureServiceBusClient>();
+
+// Update factory registration with both clients
+builder.Services.AddSingleton<IQueueClientFactory>(sp =>
+{
+    var aliyunClient = sp.GetRequiredService<AliyunMnsClient>();
+    var azureClient = sp.GetRequiredService<AzureServiceBusClient>();
+
+    var clients = new List<IQueueClient> { aliyunClient, azureClient };
+    var factory = new QueueClientFactory(clients);
+
+    // Parse provider from config
+    var messagePullConfig = sp.GetRequiredService<IOptions<MessagePullJobConfiguration>>().Value;
+    if (Enum.TryParse<QueueProvider>(builder.Configuration["MessagePullJob:Provider"], out var provider))
+    {
+        // Initialize only the configured client
+        factory.GetClient(provider).Initialize(CancellationToken.None);
+    }
+
+    return factory;
+});
 
 // Add MongoDB service
 builder.Services.AddMongoDb(builder.Configuration);
