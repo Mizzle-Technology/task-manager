@@ -1,5 +1,5 @@
 using mongodb_service.Models;
-using mongodb_service.Services;
+using mongodb_service.Repositories;
 
 namespace workers.Services;
 

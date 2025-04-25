@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Options;
+using subscriber.Services.Queues.Exceptions;
 using Azure.Messaging.ServiceBus;
 using Azure.Messaging.ServiceBus.Administration;
-using subscriber.Services.Queues.Exceptions;
+using Microsoft.Extensions.Options;
 
 namespace subscriber.Services.Queues.Azure;
 

@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using mongodb_service.Services;
+using mongodb_service.Repositories;
 
 namespace workers.Controllers;
 
