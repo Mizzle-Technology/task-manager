@@ -4,9 +4,13 @@ using subscriber.Services.Queues.Aliyun;
 using subscriber.Services.Queues.Azure;
 using mongodb_service.Extensions;
 using subscriber.Services.Queues;
+using subscriber.Services.Topics.Azure;
 using Microsoft.Extensions.Options;
 using subscriber.Configuration.ServiceBus;
 using subscriber.Configuration.Jobs;
+using ITopicClient = subscriber.Services.Topics.ITopicClient;
+using ITopicClientFactory = subscriber.Services.Topics.ITopicClientFactory;
+using TopicClientFactory = subscriber.Services.Topics.TopicClientFactory;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.

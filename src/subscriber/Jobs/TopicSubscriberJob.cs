@@ -1,6 +1,4 @@
 using Quartz;
-using subscriber.Services.Queues;
-using subscriber.Services.Queues.Azure;
 using Microsoft.Extensions.Options;
 using mongodb_service.Repositories;
 using mongodb_service.Models;
@@ -8,10 +6,11 @@ using Polly;
 using Polly.Retry;
 using System.Diagnostics;
 using subscriber.Configuration.Jobs;
+using ITopicClient = subscriber.Services.Topics.ITopicClient;
+using ITopicClientFactory = subscriber.Services.Topics.ITopicClientFactory;
+using TopicSubscriptionMessage = subscriber.Services.Topics.TopicSubscriptionMessage;
 
 namespace subscriber.Jobs;
-
-
 
 public class TopicSubscriberJob : IJob
 {
