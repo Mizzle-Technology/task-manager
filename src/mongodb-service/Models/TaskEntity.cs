@@ -43,4 +43,7 @@ public class TaskEntity : BaseEntity
 
     [BsonElement("lockedAt")]
     public DateTime? LockedAt { get; set; }
+
+    [BsonElement("metadata")]
+    public Dictionary<string, string> Metadata { get; set; } = new Dictionary<string, string>();
 }
