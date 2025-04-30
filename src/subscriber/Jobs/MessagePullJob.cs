@@ -19,7 +19,7 @@ public record Message(
 
 public record MessagePullJobConfiguration
 {
-    public QueueProvider Provider { get; set; } = QueueProvider.AliyunMNS;
+    public QueueProvider Provider { get; set; } = QueueProvider.AzureServiceBus;
     public string QueueName { get; set; } = string.Empty;
     public int BatchSize { get; set; } = 10;
     public int PollingWaitSeconds { get; set; } = 30;
@@ -107,7 +107,7 @@ public class MessagePullJob : IJob
             var messageList = messages.ToList();
             _totalProcessedCount = messageList.Count;
 
-            if (!messageList.Any())
+            if (messageList.Count == 0)
             {
                 _logger.LogInformation("No messages pulled from queue {QueueName}", _config.QueueName);
                 return;
