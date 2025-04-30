@@ -7,4 +7,5 @@ public class ServiceBusConfiguration
 	public TimeSpan MaxLockDuration { get; set; } = TimeSpan.FromMinutes(5);
 	public int MaxDeliveryCount { get; set; } = 10;
 	public bool RequireSession { get; set; } = false;
+	public ServiceBusTopicConfiguration? Topic { get; set; }
 }

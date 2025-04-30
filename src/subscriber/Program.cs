@@ -5,7 +5,8 @@ using subscriber.Services.Queues.Azure;
 using mongodb_service.Extensions;
 using subscriber.Services.Queues;
 using Microsoft.Extensions.Options;
-
+using subscriber.Configuration.ServiceBus;
+using subscriber.Configuration.Jobs;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -17,14 +18,20 @@ builder.Services.AddControllers();
 builder.Services.AddQuartz(q =>
 {
     var jobKey = new JobKey("MessagePullJob");
-
     q.AddJob<MessagePullJob>(opts => opts.WithIdentity(jobKey));
-
     q.AddTrigger(opts => opts
         .ForJob(jobKey)
         .WithIdentity("MessagePull-trigger")
         // Run every 10 seconds
         .WithCronSchedule("0/10 * * * * ?"));
+
+    // Topic Subscriber Job
+    var topicJobKey = new JobKey("TopicSubscriberJob");
+    q.AddJob<TopicSubscriberJob>(opts => opts.WithIdentity(topicJobKey));
+    q.AddTrigger(opts => opts
+        .ForJob(topicJobKey)
+        .WithIdentity("TopicSubscriber-trigger")
+        .WithCronSchedule("0/15 * * * * ?")); // Run every 15 seconds
 });
 
 // Add the Quartz.NET hosted service
@@ -37,8 +44,16 @@ builder.Services.AddSingleton<IQueueClient, AliyunMnsClient>();
 
 // OR for Azure Service Bus
 builder.Services.Configure<ServiceBusConfiguration>(
-    builder.Configuration.GetSection("AzureServiceBus")); // You need this section in appsettings
+    builder.Configuration.GetSection("AzureServiceBus"));
 builder.Services.AddSingleton<AzureServiceBusClient>();
+
+// Add topic services
+builder.Services.AddSingleton<ITopicClient, AzureServiceBusTopic>();
+builder.Services.AddSingleton<ITopicClientFactory, TopicClientFactory>();
+
+// Add topic subscriber job configuration
+builder.Services.Configure<TopicSubscriberJobConfiguration>(
+    builder.Configuration.GetSection("TopicSubscriberJob"));
 
 // Update factory registration with both clients
 builder.Services.AddSingleton<IQueueClientFactory>(sp =>

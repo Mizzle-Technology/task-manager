@@ -4,6 +4,7 @@ using Azure.Messaging.ServiceBus.Administration;
 using Microsoft.Extensions.Logging; // Assuming standard Microsoft logging
 using subscriber.Services.Queues.Exceptions;
 using subscriber.Configuration.ServiceBus;
+using Microsoft.Extensions.Options;
 
 namespace subscriber.Services.Queues.Azure
 {
@@ -101,30 +102,32 @@ namespace subscriber.Services.Queues.Azure
 		private readonly ILogger<AzureServiceBusTopic> _logger;
 		private readonly ServiceBusClient _client;
 		private readonly ServiceBusTopicConfiguration _config;
+		private readonly string _connectionString;
 		private ServiceBusSender? _topicSender;
 		// Store receivers, keyed by subscription name
 		private readonly Dictionary<string, ServiceBusReceiver> _subscriptionReceivers = new();
-		// REMOVED: No longer storing received messages state here
-		// private readonly Dictionary<string, Dictionary<string, ServiceBusReceivedMessage>> _receivedMessages = new();
 		private bool _isInitialized;
 
 		public AzureServiceBusTopic(
 				ILogger<AzureServiceBusTopic> logger,
-				ServiceBusTopicConfiguration config)
+				IOptions<ServiceBusConfiguration> config)
 		{
 			_logger = logger ?? throw new ArgumentNullException(nameof(logger));
-			_config = config ?? throw new ArgumentNullException(nameof(config));
 
-			if (string.IsNullOrEmpty(_config.ConnectionString))
+			var serviceBusConfig = config?.Value ?? throw new ArgumentNullException(nameof(config));
+			if (string.IsNullOrEmpty(serviceBusConfig.ConnectionString))
 				throw new ArgumentException("Connection string cannot be empty", nameof(config));
+
+			_connectionString = serviceBusConfig.ConnectionString;
+			_config = serviceBusConfig.Topic ?? throw new ArgumentException("Topic configuration is missing", nameof(config));
+
 			if (string.IsNullOrEmpty(_config.TopicName))
 				throw new ArgumentException("Topic name cannot be empty", nameof(config));
 			if (_config.SubscriptionNames == null || _config.SubscriptionNames.Length == 0)
 				_logger.LogWarning("No subscription names provided in configuration for topic {TopicName}.", _config.TopicName);
 
-
 			// Consider adding ServiceBusClientOptions here if needed (e.g., RetryOptions)
-			_client = new ServiceBusClient(_config.ConnectionString);
+			_client = new ServiceBusClient(_connectionString);
 		}
 
 		public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -133,7 +136,7 @@ namespace subscriber.Services.Queues.Azure
 
 			try
 			{
-				var adminClient = new ServiceBusAdministrationClient(_config.ConnectionString);
+				var adminClient = new ServiceBusAdministrationClient(_connectionString);
 
 				// Create topic if it doesn't exist
 				if (!await adminClient.TopicExistsAsync(_config.TopicName, cancellationToken))
