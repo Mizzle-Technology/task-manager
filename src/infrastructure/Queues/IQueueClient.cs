@@ -1,4 +1,4 @@
-namespace subscriber.Services.Queues;
+namespace infrastructure.Queues;
 
 public interface IQueueClient : IAsyncDisposable
 {
@@ -13,4 +13,5 @@ public record QueueHealth(
     bool IsHealthy,
     string Status,
     long ActiveMessageCount,
-    long DeadLetterMessageCount);
+    long DeadLetterMessageCount
+);

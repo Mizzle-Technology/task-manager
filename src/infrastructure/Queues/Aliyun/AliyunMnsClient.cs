@@ -1,9 +1,10 @@
 using Aliyun.MNS;
-using Microsoft.Extensions.Options;
 using Aliyun.MNS.Model;
-using subscriber.Services.Queues.Exceptions;
+using infrastructure.Queues.Exceptions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace subscriber.Services.Queues.Aliyun;
+namespace infrastructure.Queues.Aliyun;
 
 public class AliyunMnsClient : IQueueClient
 {
@@ -17,21 +18,20 @@ public class AliyunMnsClient : IQueueClient
     public AliyunMnsClient(
         ILogger<AliyunMnsClient> logger,
         ILoggerFactory loggerFactory,
-        IOptions<AliyunMnsConfiguration> config)
+        IOptions<AliyunMnsConfiguration> config
+    )
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
         _config = config.Value ?? throw new ArgumentNullException(nameof(config));
         _queues = [];
-        _mnsClient = new MNSClient(
-            _config.AccessKeyId,
-            _config.AccessKeySecret,
-            _config.Endpoint);
+        _mnsClient = new MNSClient(_config.AccessKeyId, _config.AccessKeySecret, _config.Endpoint);
     }
 
     public void Initialize(CancellationToken cancellationToken)
     {
-        if (_isInitialized) return;
+        if (_isInitialized)
+            return;
 
         try
         {
@@ -40,7 +40,11 @@ public class AliyunMnsClient : IQueueClient
         }
         catch (MNSException ex)
         {
-            _logger.LogError(ex, "Failed to initialize MNS client. ErrorCode: {ErrorCode}", ex.ErrorCode);
+            _logger.LogError(
+                ex,
+                "Failed to initialize MNS client. ErrorCode: {ErrorCode}",
+                ex.ErrorCode
+            );
             throw new QueueOperationException("Failed to initialize MNS client", ex);
         }
     }
@@ -49,7 +53,9 @@ public class AliyunMnsClient : IQueueClient
     {
         if (!_isInitialized)
         {
-            throw new InvalidOperationException("MNS client not initialized. Call InitializeAsync first.");
+            throw new InvalidOperationException(
+                "MNS client not initialized. Call InitializeAsync first."
+            );
         }
 
         if (!_queues.TryGetValue(queueName, out var queue))
@@ -77,11 +83,15 @@ public class AliyunMnsClient : IQueueClient
                 "Healthy",
                 attributes.Attributes.ActiveMessages,
                 attributes.Attributes.InactiveMessages
-                );
+            );
         }
         catch (MNSException ex)
         {
-            _logger.LogError(ex, "Failed to get MNS queue health. ErrorCode: {ErrorCode}", ex.ErrorCode);
+            _logger.LogError(
+                ex,
+                "Failed to get MNS queue health. ErrorCode: {ErrorCode}",
+                ex.ErrorCode
+            );
             return new QueueHealth(false, ex.Message, 0, 0);
         }
     }
@@ -97,28 +107,35 @@ public class AliyunMnsClient : IQueueClient
                 MessageRetentionPeriod = 345600,
                 VisibilityTimeout = 30,
                 PollingWaitSeconds = 30,
-                LoggingEnabled = true
+                LoggingEnabled = true,
             };
 
             // Create DLQ first
             var deadLetterQueue = CreateQueueIfNotExistsAsync(
                 _config.DeadLetterQueueName,
                 new CreateQueueRequest(_config.DeadLetterQueueName, queueAttributes),
-                cancellationToken);
+                cancellationToken
+            );
 
             var mainQueue = CreateQueueIfNotExistsAsync(
                 _config.QueueName,
                 new CreateQueueRequest(_config.QueueName, queueAttributes),
-                cancellationToken);
+                cancellationToken
+            );
 
             _queues[_config.QueueName] = new AliyunMnsQueue(
                 _loggerFactory.CreateLogger<AliyunMnsQueue>(),
                 mainQueue,
-                deadLetterQueue);
+                deadLetterQueue
+            );
         }
         catch (MNSException ex)
         {
-            _logger.LogError(ex, "Failed to ensure queues exist. ErrorCode: {ErrorCode}", ex.ErrorCode);
+            _logger.LogError(
+                ex,
+                "Failed to ensure queues exist. ErrorCode: {ErrorCode}",
+                ex.ErrorCode
+            );
             throw new QueueOperationException("Failed to initialize queues", ex);
         }
     }
@@ -126,7 +143,8 @@ public class AliyunMnsClient : IQueueClient
     private Queue CreateQueueIfNotExistsAsync(
         string queueName,
         CreateQueueRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         ArgumentNullException.ThrowIfNull(queueName);
         var queue = _mnsClient.GetNativeQueue(queueName);
@@ -148,7 +166,10 @@ public class AliyunMnsClient : IQueueClient
             }
             catch (MNSException verifyEx)
             {
-                throw new QueueOperationException($"Failed to verify queue {queueName} after creation", verifyEx);
+                throw new QueueOperationException(
+                    $"Failed to verify queue {queueName} after creation",
+                    verifyEx
+                );
             }
         }
         catch (MNSException ex)

@@ -1,4 +1,4 @@
-namespace subscriber.Services.Queues.Aliyun;
+namespace infrastructure.Queues.Aliyun;
 
 public class AliyunMnsConfiguration
 {

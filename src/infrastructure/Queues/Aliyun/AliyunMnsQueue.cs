@@ -1,7 +1,8 @@
-using subscriber.Services.Queues.Exceptions;
 using Aliyun.MNS;
+using infrastructure.Queues.Exceptions;
+using Microsoft.Extensions.Logging;
 
-namespace subscriber.Services.Queues.Aliyun;
+namespace infrastructure.Queues.Aliyun;
 
 public class AliyunMnsQueue : IMessageQueue
 {
@@ -9,10 +10,7 @@ public class AliyunMnsQueue : IMessageQueue
     private readonly Queue _queue;
     private readonly Queue _deadLetterQueue;
 
-    public AliyunMnsQueue(
-        ILogger<AliyunMnsQueue> logger,
-        Queue queue,
-        Queue deadLetterQueue)
+    public AliyunMnsQueue(ILogger<AliyunMnsQueue> logger, Queue queue, Queue deadLetterQueue)
     {
         _logger = logger;
         _queue = queue;
@@ -22,15 +20,19 @@ public class AliyunMnsQueue : IMessageQueue
     public async Task<IEnumerable<IQueueMessage>> ReceiveMessagesAsync(
         int maxMessages,
         TimeSpan visibilityTimeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             var messages = await Task.Run(
-                () => _queue.BatchReceiveMessage(
-                    (uint)maxMessages,
-                    (uint)visibilityTimeout.TotalSeconds),
-                cancellationToken);
+                () =>
+                    _queue.BatchReceiveMessage(
+                        (uint)maxMessages,
+                        (uint)visibilityTimeout.TotalSeconds
+                    ),
+                cancellationToken
+            );
 
             return messages.Messages.Select(m => new AliyunMnsMessage(m));
         }
@@ -43,30 +45,34 @@ public class AliyunMnsQueue : IMessageQueue
 
     public async Task CompleteMessageAsync(
         IQueueMessage message,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
-            await Task.Run(
-                () => _queue.DeleteMessage(message.ReceiptHandle),
-                cancellationToken);
+            await Task.Run(() => _queue.DeleteMessage(message.ReceiptHandle), cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to complete message {MessageId}", message.MessageId);
-            throw new QueueOperationException($"Failed to complete message {message.MessageId}", ex);
+            throw new QueueOperationException(
+                $"Failed to complete message {message.MessageId}",
+                ex
+            );
         }
     }
 
     public async Task AbandonMessageAsync(
         IQueueMessage message,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             await Task.Run(
                 () => _queue.ChangeMessageVisibility(message.ReceiptHandle, 0),
-                cancellationToken);
+                cancellationToken
+            );
         }
         catch (Exception ex)
         {
@@ -78,19 +84,21 @@ public class AliyunMnsQueue : IMessageQueue
     public async Task DeadLetterMessageAsync(
         IQueueMessage message,
         string reason,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             await CompleteMessageAsync(message, cancellationToken);
-            await Task.Run(
-                () => _deadLetterQueue.SendMessage(message.Body),
-                cancellationToken);
+            await Task.Run(() => _deadLetterQueue.SendMessage(message.Body), cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to dead-letter message {MessageId}", message.MessageId);
-            throw new QueueOperationException($"Failed to dead-letter message {message.MessageId}", ex);
+            throw new QueueOperationException(
+                $"Failed to dead-letter message {message.MessageId}",
+                ex
+            );
         }
     }
 }

@@ -1,4 +1,4 @@
-namespace subscriber.Services.Queues;
+namespace infrastructure.Queues;
 
 /// <summary>
 /// General interface for a queue/subscription message
