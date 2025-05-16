@@ -1,21 +1,15 @@
-using Quartz;
-using subscriber.Services.Queues;
-
+using System.Diagnostics;
+using infrastructure.Queues;
 using Microsoft.Extensions.Options;
-using mongodb_service.Repositories;
 using mongodb_service.Models;
+using mongodb_service.Repositories;
 using Polly;
 using Polly.Retry;
-using System.Diagnostics;
+using Quartz;
 
 namespace subscriber.Jobs;
 
-public record Message(
-    string Id,
-    string Content,
-    DateTime ReceivedAt,
-    string ReceiptHandle
-);
+public record Message(string Id, string Content, DateTime ReceivedAt, string ReceiptHandle);
 
 public record MessagePullJobConfiguration
 {
@@ -45,7 +39,8 @@ public class MessagePullJob : IJob
         ILogger<MessagePullJob> logger,
         IQueueClientFactory queueFactory,
         IMongoDbRepository mongoDb,
-        IOptions<MessagePullJobConfiguration> config)
+        IOptions<MessagePullJobConfiguration> config
+    )
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _queueFactory = queueFactory ?? throw new ArgumentNullException(nameof(queueFactory));
@@ -57,21 +52,30 @@ public class MessagePullJob : IJob
 
         _retryPolicy = Policy
             .Handle<Exception>()
-            .WaitAndRetryAsync(3,
+            .WaitAndRetryAsync(
+                3,
                 retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                 onRetry: (ex, timeSpan, retryCount, _) =>
                 {
-                    _logger.LogWarning(ex,
+                    _logger.LogWarning(
+                        ex,
                         "Retry {RetryCount} after {Delay}s due to: {Error}",
-                        retryCount, timeSpan.TotalSeconds, ex.Message);
-                });
+                        retryCount,
+                        timeSpan.TotalSeconds,
+                        ex.Message
+                    );
+                }
+            );
     }
 
     public async Task Execute(IJobExecutionContext context)
     {
         var stopwatch = Stopwatch.StartNew();
-        _logger.LogInformation("Starting message pull job at: {time} for provider {provider}",
-            DateTimeOffset.Now, _config.Provider);
+        _logger.LogInformation(
+            "Starting message pull job at: {time} for provider {provider}",
+            DateTimeOffset.Now,
+            _config.Provider
+        );
 
         _totalProcessedCount = 0;
         _successCount = 0;
@@ -86,38 +90,52 @@ public class MessagePullJob : IJob
             var health = await _queueClient.GetQueueHealthAsync(context.CancellationToken);
             if (!health.IsHealthy)
             {
-                _logger.LogError("Queue {QueueName} is not healthy. Status: {Status}",
-                    _config.QueueName, health.Status);
+                _logger.LogError(
+                    "Queue {QueueName} is not healthy. Status: {Status}",
+                    _config.QueueName,
+                    health.Status
+                );
                 return;
             }
 
             var queue = _queueClient.GetQueue(_config.QueueName);
             if (queue == null)
             {
-                _logger.LogError("Failed to get queue {QueueName}. Queue might not be initialized",
-                    _config.QueueName);
+                _logger.LogError(
+                    "Failed to get queue {QueueName}. Queue might not be initialized",
+                    _config.QueueName
+                );
                 return;
             }
 
             var messages = await queue.ReceiveMessagesAsync(
                 _config.BatchSize,
                 TimeSpan.FromSeconds(_config.PollingWaitSeconds),
-                context.CancellationToken);
+                context.CancellationToken
+            );
 
             var messageList = messages.ToList();
             _totalProcessedCount = messageList.Count;
 
             if (messageList.Count == 0)
             {
-                _logger.LogInformation("No messages pulled from queue {QueueName}", _config.QueueName);
+                _logger.LogInformation(
+                    "No messages pulled from queue {QueueName}",
+                    _config.QueueName
+                );
                 return;
             }
 
-            _logger.LogInformation("Pulled {Count} messages from queue {QueueName}",
-                messageList.Count, _config.QueueName);
+            _logger.LogInformation(
+                "Pulled {Count} messages from queue {QueueName}",
+                messageList.Count,
+                _config.QueueName
+            );
 
             // Process messages in parallel
-            var tasks = messageList.Select(message => ProcessMessageSafeAsync(message, queue, context.CancellationToken));
+            var tasks = messageList.Select(message =>
+                ProcessMessageSafeAsync(message, queue, context.CancellationToken)
+            );
             var results = await Task.WhenAll(tasks);
 
             _successCount = results.Count(r => r);
@@ -133,7 +151,11 @@ public class MessagePullJob : IJob
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error executing message pull job for queue {QueueName}", _config.QueueName);
+            _logger.LogError(
+                ex,
+                "Error executing message pull job for queue {QueueName}",
+                _config.QueueName
+            );
             throw;
         }
         finally
@@ -142,26 +164,33 @@ public class MessagePullJob : IJob
 
             // Log metrics for monitoring
             _logger.LogInformation(
-                "Message pull job metrics: Provider={Provider}, Queue={QueueName}, Elapsed={ElapsedMs}ms, " +
-                "TotalMessages={TotalCount}, SuccessRate={SuccessRate}%, " +
-                "AvgProcessingTimeMs={AvgProcessingTime}",
+                "Message pull job metrics: Provider={Provider}, Queue={QueueName}, Elapsed={ElapsedMs}ms, "
+                    + "TotalMessages={TotalCount}, SuccessRate={SuccessRate}%, "
+                    + "AvgProcessingTimeMs={AvgProcessingTime}",
                 _config.Provider,
                 _config.QueueName,
                 stopwatch.ElapsedMilliseconds,
                 _totalProcessedCount,
                 _totalProcessedCount > 0 ? (_successCount * 100.0 / _totalProcessedCount) : 0,
-                _totalProcessedCount > 0 ? (stopwatch.ElapsedMilliseconds / _totalProcessedCount) : 0
+                _totalProcessedCount > 0
+                    ? (stopwatch.ElapsedMilliseconds / _totalProcessedCount)
+                    : 0
             );
         }
     }
 
-    private async Task<bool> ProcessMessageSafeAsync(IQueueMessage message, IMessageQueue queue, CancellationToken jobCancellation)
+    private async Task<bool> ProcessMessageSafeAsync(
+        IQueueMessage message,
+        IMessageQueue queue,
+        CancellationToken jobCancellation
+    )
     {
         var processingStopwatch = Stopwatch.StartNew();
         using var timeoutCts = new CancellationTokenSource(MessageProcessingTimeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             timeoutCts.Token,
-            jobCancellation);
+            jobCancellation
+        );
 
         var messageId = message.MessageId;
         _logger.LogDebug("Processing message {MessageId}", messageId);
@@ -175,13 +204,16 @@ public class MessagePullJob : IJob
                 TaskId = messageId,
                 Body = message.Body,
                 Status = JobTaskStatus.Processing,
-                RetryCount = 0
+                RetryCount = 0,
             };
 
             // Insert the task first - before we complete the message from the queue
             await _mongoDb.InsertOrUpdateTaskAsync(task);
-            _logger.LogInformation("Task {TaskId} stored in MongoDB with status {Status}",
-                task.TaskId, task.Status);
+            _logger.LogInformation(
+                "Task {TaskId} stored in MongoDB with status {Status}",
+                task.TaskId,
+                task.Status
+            );
 
             // Now process using the retry policy
             var success = await _retryPolicy.ExecuteAsync(async () =>
@@ -201,22 +233,33 @@ public class MessagePullJob : IJob
             {
                 // Only complete the message from the queue after successful processing
                 await queue.CompleteMessageAsync(message, linkedCts.Token);
-                _logger.LogInformation("Message {MessageId} processed successfully in {ElapsedMs}ms",
-                    messageId, processingStopwatch.ElapsedMilliseconds);
+                _logger.LogInformation(
+                    "Message {MessageId} processed successfully in {ElapsedMs}ms",
+                    messageId,
+                    processingStopwatch.ElapsedMilliseconds
+                );
                 return true;
             }
             else
             {
                 // This should not happen due to retry policy, but handle just in case
                 _logger.LogError("Failed to process message {MessageId} after retries", messageId);
-                await HandleFailedMessage(message, queue, "Processing failed after retries", linkedCts.Token);
+                await HandleFailedMessage(
+                    message,
+                    queue,
+                    "Processing failed after retries",
+                    linkedCts.Token
+                );
                 return false;
             }
         }
         catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
         {
-            _logger.LogError("Processing of message {MessageId} timed out after {Timeout}s",
-                messageId, MessageProcessingTimeout.TotalSeconds);
+            _logger.LogError(
+                "Processing of message {MessageId} timed out after {Timeout}s",
+                messageId,
+                MessageProcessingTimeout.TotalSeconds
+            );
 
             await _mongoDb.TryUpdateTaskStatusAsync(messageId, JobTaskStatus.Failed);
 
@@ -235,12 +278,20 @@ public class MessagePullJob : IJob
         finally
         {
             processingStopwatch.Stop();
-            _logger.LogDebug("Message {MessageId} processing took {ElapsedMs}ms",
-                messageId, processingStopwatch.ElapsedMilliseconds);
+            _logger.LogDebug(
+                "Message {MessageId} processing took {ElapsedMs}ms",
+                messageId,
+                processingStopwatch.ElapsedMilliseconds
+            );
         }
     }
 
-    private async Task HandleFailedMessage(IQueueMessage message, IMessageQueue queue, string reason, CancellationToken cancellationToken)
+    private async Task HandleFailedMessage(
+        IQueueMessage message,
+        IMessageQueue queue,
+        string reason,
+        CancellationToken cancellationToken
+    )
     {
         try
         {
@@ -248,15 +299,21 @@ public class MessagePullJob : IJob
             {
                 // Send to dead-letter queue for later investigation
                 await queue.DeadLetterMessageAsync(message, reason, cancellationToken);
-                _logger.LogWarning("Message {MessageId} sent to dead-letter queue: {Reason}",
-                    message.MessageId, reason);
+                _logger.LogWarning(
+                    "Message {MessageId} sent to dead-letter queue: {Reason}",
+                    message.MessageId,
+                    reason
+                );
             }
             else
             {
                 // Return to the queue for reprocessing
                 await queue.AbandonMessageAsync(message, cancellationToken);
-                _logger.LogWarning("Message {MessageId} abandoned and returned to queue: {Reason}",
-                    message.MessageId, reason);
+                _logger.LogWarning(
+                    "Message {MessageId} abandoned and returned to queue: {Reason}",
+                    message.MessageId,
+                    reason
+                );
             }
         }
         catch (Exception ex)

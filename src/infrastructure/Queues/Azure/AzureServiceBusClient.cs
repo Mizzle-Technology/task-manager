@@ -1,9 +1,11 @@
-using subscriber.Services.Queues.Exceptions;
 using Azure.Messaging.ServiceBus;
 using Azure.Messaging.ServiceBus.Administration;
+using infrastructure.Configuration.ServiceBus;
+using infrastructure.Queues.Exceptions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace subscriber.Services.Queues.Azure;
+namespace infrastructure.Queues.Azure;
 
 public class AzureServiceBusClient : IQueueClient
 {
@@ -17,7 +19,8 @@ public class AzureServiceBusClient : IQueueClient
     public AzureServiceBusClient(
         ILogger<AzureServiceBusClient> logger,
         ILoggerFactory loggerFactory,
-        IOptions<ServiceBusConfiguration> config)
+        IOptions<ServiceBusConfiguration> config
+    )
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
@@ -28,7 +31,8 @@ public class AzureServiceBusClient : IQueueClient
 
     public void Initialize(CancellationToken cancellationToken)
     {
-        if (_isInitialized) return;
+        if (_isInitialized)
+            return;
 
         try
         {
@@ -40,7 +44,8 @@ public class AzureServiceBusClient : IQueueClient
 
                 _queues[queueName] = new ServiceBusQueue(
                     _loggerFactory.CreateLogger<ServiceBusQueue>(),
-                    receiver);
+                    receiver
+                );
             }
 
             _isInitialized = true;
@@ -56,7 +61,9 @@ public class AzureServiceBusClient : IQueueClient
     {
         if (!_isInitialized)
         {
-            throw new InvalidOperationException("Service Bus client not initialized. Call InitializeAsync first.");
+            throw new InvalidOperationException(
+                "Service Bus client not initialized. Call InitializeAsync first."
+            );
         }
 
         if (!_queues.TryGetValue(queueName, out var queue))
@@ -74,13 +81,15 @@ public class AzureServiceBusClient : IQueueClient
             var adminClient = new ServiceBusAdministrationClient(_config.ConnectionString);
             var queueProperties = await adminClient.GetQueueRuntimePropertiesAsync(
                 _config.QueueNames.First(),
-                cancellationToken);
+                cancellationToken
+            );
 
             return new QueueHealth(
                 IsHealthy: true,
                 Status: "Healthy",
                 ActiveMessageCount: queueProperties.Value.ActiveMessageCount,
-                DeadLetterMessageCount: queueProperties.Value.DeadLetterMessageCount);
+                DeadLetterMessageCount: queueProperties.Value.DeadLetterMessageCount
+            );
         }
         catch (Exception ex)
         {
@@ -89,7 +98,8 @@ public class AzureServiceBusClient : IQueueClient
                 IsHealthy: false,
                 Status: ex.Message,
                 ActiveMessageCount: 0,
-                DeadLetterMessageCount: 0);
+                DeadLetterMessageCount: 0
+            );
         }
     }
 

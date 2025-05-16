@@ -1,25 +1,27 @@
 using Azure.Messaging.ServiceBus;
-using subscriber.Services.Queues.Exceptions;
+using infrastructure.Queues.Exceptions;
+using Microsoft.Extensions.Logging;
 
-namespace subscriber.Services.Queues.Azure;
+namespace infrastructure.Queues.Azure;
 
-public class ServiceBusQueue(
-    ILogger<ServiceBusQueue> _logger,
-    ServiceBusReceiver _receiver) : IMessageQueue
+public class ServiceBusQueue(ILogger<ServiceBusQueue> _logger, ServiceBusReceiver _receiver)
+    : IMessageQueue
 {
     private readonly Dictionary<string, ServiceBusReceivedMessage> _receivedMessages = [];
 
     public async Task<IEnumerable<IQueueMessage>> ReceiveMessagesAsync(
         int maxMessages,
         TimeSpan visibilityTimeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             var messages = await _receiver.ReceiveMessagesAsync(
                 maxMessages,
                 visibilityTimeout,
-                cancellationToken);
+                cancellationToken
+            );
 
             // Store received messages for later operations
             foreach (var message in messages)
@@ -38,13 +40,16 @@ public class ServiceBusQueue(
 
     public async Task CompleteMessageAsync(
         IQueueMessage message,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             if (!_receivedMessages.TryGetValue(message.ReceiptHandle, out var receivedMessage))
             {
-                throw new QueueOperationException($"Message {message.MessageId} not found in received messages");
+                throw new QueueOperationException(
+                    $"Message {message.MessageId} not found in received messages"
+                );
             }
 
             await _receiver.CompleteMessageAsync(receivedMessage, cancellationToken);
@@ -53,22 +58,31 @@ public class ServiceBusQueue(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to complete message {MessageId}", message.MessageId);
-            throw new QueueOperationException($"Failed to complete message {message.MessageId}", ex);
+            throw new QueueOperationException(
+                $"Failed to complete message {message.MessageId}",
+                ex
+            );
         }
     }
 
     public async Task AbandonMessageAsync(
         IQueueMessage message,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             if (!_receivedMessages.TryGetValue(message.ReceiptHandle, out var receivedMessage))
             {
-                throw new QueueOperationException($"Message {message.MessageId} not found in received messages");
+                throw new QueueOperationException(
+                    $"Message {message.MessageId} not found in received messages"
+                );
             }
 
-            await _receiver.AbandonMessageAsync(receivedMessage, cancellationToken: cancellationToken);
+            await _receiver.AbandonMessageAsync(
+                receivedMessage,
+                cancellationToken: cancellationToken
+            );
             _receivedMessages.Remove(message.ReceiptHandle);
         }
         catch (Exception ex)
@@ -81,22 +95,32 @@ public class ServiceBusQueue(
     public async Task DeadLetterMessageAsync(
         IQueueMessage message,
         string reason,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         try
         {
             if (!_receivedMessages.TryGetValue(message.ReceiptHandle, out var receivedMessage))
             {
-                throw new QueueOperationException($"Message {message.MessageId} not found in received messages");
+                throw new QueueOperationException(
+                    $"Message {message.MessageId} not found in received messages"
+                );
             }
 
-            await _receiver.DeadLetterMessageAsync(receivedMessage, reason, cancellationToken: cancellationToken);
+            await _receiver.DeadLetterMessageAsync(
+                receivedMessage,
+                reason,
+                cancellationToken: cancellationToken
+            );
             _receivedMessages.Remove(message.ReceiptHandle);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to dead-letter message {MessageId}", message.MessageId);
-            throw new QueueOperationException($"Failed to dead-letter message {message.MessageId}", ex);
+            throw new QueueOperationException(
+                $"Failed to dead-letter message {message.MessageId}",
+                ex
+            );
         }
     }
 }
