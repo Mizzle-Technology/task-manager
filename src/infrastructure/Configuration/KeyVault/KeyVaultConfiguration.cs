@@ -14,4 +14,9 @@ public class KeyVaultConfiguration
     /// The default key identifier to use for encryption/decryption.
     /// </summary>
     public string DefaultKeyId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Cache time-to-live in seconds for GetSecretAsync results.
+    /// </summary>
+    public int CacheTtlSeconds { get; set; } = 300;
 }

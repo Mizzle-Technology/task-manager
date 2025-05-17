@@ -12,6 +12,13 @@ public interface IMessageQueue
 
     Task AbandonMessageAsync(IQueueMessage message, CancellationToken cancellationToken);
 
+    Task SendMessageAsync(
+        IQueueMessage message,
+        uint delaySeconds,
+        uint priority,
+        CancellationToken cancellationToken
+    );
+
     Task DeadLetterMessageAsync(
         IQueueMessage message,
         string reason,

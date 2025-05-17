@@ -44,7 +44,8 @@ public class AzureServiceBusClient : IQueueClient
 
                 _queues[queueName] = new ServiceBusQueue(
                     _loggerFactory.CreateLogger<ServiceBusQueue>(),
-                    receiver
+                    receiver,
+                    sender
                 );
             }
 

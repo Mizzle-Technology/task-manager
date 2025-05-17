@@ -1,11 +1,15 @@
+using System;
 using Azure.Messaging.ServiceBus;
 using infrastructure.Queues.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace infrastructure.Queues.Azure;
 
-public class ServiceBusQueue(ILogger<ServiceBusQueue> _logger, ServiceBusReceiver _receiver)
-    : IMessageQueue
+public class ServiceBusQueue(
+    ILogger<ServiceBusQueue> _logger,
+    ServiceBusReceiver _receiver,
+    ServiceBusSender _sender
+) : IMessageQueue
 {
     private readonly Dictionary<string, ServiceBusReceivedMessage> _receivedMessages = [];
 
@@ -121,6 +125,30 @@ public class ServiceBusQueue(ILogger<ServiceBusQueue> _logger, ServiceBusReceive
                 $"Failed to dead-letter message {message.MessageId}",
                 ex
             );
+        }
+    }
+
+    public async Task SendMessageAsync(
+        IQueueMessage message,
+        uint delaySeconds,
+        uint priority,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var sbMessage = new ServiceBusMessage(message.Body)
+            {
+                MessageId = message.MessageId,
+                ScheduledEnqueueTime = DateTimeOffset.UtcNow.AddSeconds(delaySeconds),
+            };
+            sbMessage.ApplicationProperties["Priority"] = priority;
+            await _sender.SendMessageAsync(sbMessage, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send message {MessageId} to queue", message.MessageId);
+            throw new QueueOperationException($"Failed to send message {message.MessageId}", ex);
         }
     }
 }
